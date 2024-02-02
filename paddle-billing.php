@@ -90,11 +90,8 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
     public function allowPartialRefunds()
     {
-        // Payments *can* be partially refunded via Paddle, but we can't allow
-        // that via aMember because Paddle subscription payments can be made in
-        // customer's local currency, which may be different to the aMember
-        // invoice currency. @see processRefund()
-        return false;
+        // @see processRefund()
+        return true;
     }
 
     public function getRecurringType()
@@ -116,6 +113,11 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
         $form->addSecretText('client_token', ['class' => 'am-el-wide'])
             ->setLabel("Client-Side Token\n".'From the Developer Tools > <a href="https://vendors.paddle.com/authentication-v2">Authentication menu</a> of your Paddle Dashboard.')
+            ->addRule('required')
+        ;
+
+        $form->addSecretText('secret_key', ['class' => 'am-el-wide'])
+            ->setLabel("Webhook Secret Key\n".'From the Developer Tools > <a href="https://vendors.paddle.com/notifications">Notifications menu</a> of your Paddle Dashboard. <a href="https://developer.paddle.com/webhooks/signature-verification#get-secret-key">Detailed Instructions</a>')
             ->addRule('required')
         ;
 
@@ -260,7 +262,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
         // * Open pay page
         $a = new Am_Paysystem_Action_HtmlTemplate('pay.phtml');
-
         $a->invoice = $invoice;
         $environment = $this->isSandbox() ? 'Paddle.Environment.set("sandbox");' : '';
         $client_token = $this->getConfig('client_token');
@@ -276,7 +277,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $a->form = <<<CUT
             <div class="checkout-container"></div>
             <script>
-                $environment
+                {$environment}
                 Paddle.Setup({
                     token: "{$client_token}", // replace with a client-side token
                     pwAuth: {$retain_key}, // replace with your Retain API key
@@ -292,7 +293,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                             showAddTaxId: true,
                             allowLogout: false,
                             showAddDiscounts: false,
-                            successUrl: "https://paddle.com/thankyou",
+                            successUrl: "{$thanks_url}",
                         }
                     },
                     eventCallback: function(data) {
@@ -488,6 +489,61 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         }
     }
 
+    protected function paddleJsSetupCode($email = '')
+    {
+        $environment = $this->isSandbox() ? 'Paddle.Environment.set("sandbox");' : '';
+        $client_token = $this->getConfig('client_token');
+        $retain_key = $this->getConfig('retain_key');
+        $retain_key = $retain_key ? 'pwAuth: "'.$retain_key.'",' : '';
+        $txnid = $resp_data['data']['id'];
+        $thanks_url = $this->getReturnUrl();
+        $code = <<<CUT
+            <div class="checkout-container"></div>
+            <script>
+                {$environment}
+                Paddle.Setup({
+                    token: "{$client_token}",
+                    {$retain_key},
+                    pwCustomer: {email: "{$email}"}, // can pass the id or email of your logged-in customer
+                    checkout: {
+                        settings: {
+                            displayMode: "inline",
+                            theme: "light",
+                            locale: "en",
+                            frameTarget: "checkout-container",
+                            frameInitialHeight: "450",
+                            frameStyle: "width: 100%; min-width: 312px; background-color: transparent; border: none;",
+                            showAddTaxId: true,
+                            allowLogout: false,
+                            showAddDiscounts: false,
+                            successUrl: "{$thanks_url}",
+                        }
+                    },
+                    eventCallback: function(data) {
+                        switch(data.name) {
+                          case "checkout.loaded":
+                            console.log("Checkout opened");
+                            break;
+                          case "checkout.customer.created":
+                            console.log("Customer created");
+                            break;
+                          case "checkout.completed":
+                            console.log("Checkout completed");
+                            break;
+                          default:
+                            console.log(data);
+                        }
+                    }
+                });
+            </script>
+            CUT;
+
+        $v = new Am_View();
+        $v->headScript()->appendFile('https://cdn.paddle.com/paddle/v2/paddle.js');
+
+        return $code;
+    }
+
     /**
      * Private convenience method to send authenticated Paddle API requests.
      *
@@ -542,23 +598,32 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
         'invoice_external_id' => 'order_id',
     ];
 
+    protected $event;
+
+    public function __construct(
+        Am_Paysystem_Abstract $plugin,
+        Am_Mvc_Request $request,
+        Am_Mvc_Response $response,
+        $invokeArgs
+    ) {
+        parent::__construct($plugin, $request, $response, $invokeArgs);
+        $this->event = json_decode($request->getRawBody(), true);
+    }
+
     public function findInvoiceId()
     {
         // Try decoding to get CUST_DATA_INV field
-        $ret = json_decode($this->request->getPost('passthrough'), true);
-        if (!empty($ret[Am_Paysystem_Paddle::CUST_DATA_INV])) {
-            return $ret[Am_Paysystem_Paddle::CUST_DATA_INV];
-        }
-        // Could be a legacy invoice, so return it all
-        return $this->request->getPost('passthrough');
+        $cdata = $this->event['data']['custom_data'];
+
+        return $cdata[Am_Paysystem_PaddleBilling::CUST_DATA_INV] ?? null;
     }
 
     public function autoCreateGetProducts()
     {
         // Could be a subscription plan or product ID
         $item_name = get_first(
-            $this->request->getPost('subscription_plan_id'),
-            $this->request->getPost('product_id')
+            $this->event['data']['subscription_id'],
+            $this->event['data']['product_id']
         );
         if (empty($item_name)) {
             return;
@@ -574,30 +639,31 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
 
     public function getUniqId()
     {
-        return $this->request->getPost('alert_id');
+        return $this->event['notification_id'];
     }
 
     public function getReceiptId()
     {
-        return $this->request->getPost('order_id');
+        return $this->event['transaction_id'];
     }
 
+    /**
+     * @see https://developer.paddle.com/webhooks/signature-verification
+     */
     public function validateSource()
     {
-        $fields = $this->request->getPost();
-        $public_key = $this->plugin->getConfig('public_key');
-        $signature = base64_decode($fields['p_signature']);
+        // Extract timestamp (ts) and hash (h1) from signature
+        $raw_sig = $this->request->getHeader('Paddle-Signature');
+        parse_str(str_replace(';', '&', $raw_sig), $sig);
 
-        unset($fields['p_signature']);
-        ksort($fields);
-        foreach ($fields as $k => $v) {
-            if (!in_array(gettype($v), ['object', 'array'])) {
-                $fields[$k] = "{$v}";
-            }
-        }
-        $data = serialize($fields);
+        // Build payload
+        $payload = $sig['ts'].':'.$request->getRawBody();
 
-        return openssl_verify($data, $signature, $public_key, OPENSSL_ALGO_SHA1);
+        return $sig['h1'] === hash_hmac(
+            'sha256',
+            $payload,
+            $this->getPlugin()->getConfig('secret_key')
+        );
     }
 
     public function validateStatus()
@@ -663,7 +729,7 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
                 break;
 
             case 'subscription_payment_succeeded':
-            case 'payment_succeeded':
+            case 'transaction.paid':
                 // Update user country if needed
                 $user = $this->invoice->getUser();
                 $country = $this->request->getPost('country');
@@ -860,28 +926,5 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
 
                 break;
         }
-    }
-}
-
-// Allows core templates to be overridden with plugin specific files if needed
-class Am_Paysystem_Action_HtmlTemplate_PaddleBilling extends Am_Paysystem_Action_HtmlTemplate
-{
-    protected $_template;
-    protected $_path;
-
-    public function __construct($path, $template)
-    {
-        $this->_template = $template;
-        $this->_path = $path;
-    }
-
-    public function process(/* Am_Mvc_Controller */ $action = null)
-    {
-        $action->view->addScriptPath($this->_path);
-
-        $action->view->assign($this->getVars());
-        $action->renderScript($this->_template);
-
-        throw new Am_Exception_Redirect();
     }
 }
