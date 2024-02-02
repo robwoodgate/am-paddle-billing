@@ -149,9 +149,9 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
     public function _process($invoice, $request, $result): void
     {
-        // Paddle lets us customise the checkout parameters for a product or
-        // subscription using the Generate Transaction API. This means we do
-        // not have to re-create/sync products in Paddle.
+        // Paddle lets us bill for non-catalog products and prices using the
+        // Create Transaction API. This means we do not have to create/sync
+        // products in Paddle. @see: https://developer.paddle.com/build/transactions/bill-create-custom-items-prices-products
 
         // * Prepare log
         $log = $this->getDi()->invoiceLogRecord;
@@ -212,12 +212,13 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             // Try get product specific image, fall back to default if needed
             $image_url = $item->tryLoadProduct()->img_cart_path ?? $default_img;
             $terms = $item->tryLoadProduct()->getBillingPlan()->getTerms();
-            $params['items'][] = [
+
+            // Add first payment info
+            $params['items'][] = $rebill = [
                 'quantity' => $item->qty,
                 'price' => [
                     'description' => $terms,
                     'name' => ($item->first_total) ? ___('First Payment') : ___('Free'),
-                    'trial_period' => null,
                     'tax_mode' => 'account_setting',
                     'unit_price' => [
                         'amount' => (string) ($item->first_total * pow(10, Am_Currency::$currencyList[$invoice->currency]['precision'])),
@@ -231,33 +232,20 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                     ],
                 ],
             ];
+
+            // Add rebill info
             if ($item->second_period) {
-                $params['items'][] = [
-                    'quantity' => $item->qty,
-                    'price' => [
-                        'description' => $terms,
-                        'name' => ___('Second and Subsequent Payments'),
-                        'billing_cycle' => [
-                            'interval' => $this->getInterval($item->second_period),
-                            'frequency' => $this->getFrequency($item->second_period),
-                        ],
-                        'trial_period' => [
-                            'interval' => 'day',
-                            'frequency' => $this->getDays($item->first_period),
-                        ],
-                        'tax_mode' => 'account_setting',
-                        'unit_price' => [
-                            'amount' => (string) ($item->second_total * pow(10, Am_Currency::$currencyList[$invoice->currency]['precision'])),
-                            'currency_code' => $item->currency,
-                        ],
-                        'product' => [
-                            'name' => $item->item_title,
-                            'description' => $item->item_description,
-                            'tax_category' => 'standard',
-                            'image_url' => $image_url,
-                        ],
-                    ],
+                $rebill['price']['name'] = ___('Second and Subsequent Payments');
+                $rebill['price']['billing_cycle'] = [
+                    'interval' => $this->getInterval($item->second_period),
+                    'frequency' => $this->getFrequency($item->second_period),
                 ];
+                $rebill['price']['trial_period'] = [
+                    'interval' => 'day',
+                    'frequency' => $this->getDays($item->first_period),
+                ];
+                $rebill['price']['unit_price']['amount'] = (string) ($item->second_total * pow(10, Am_Currency::$currencyList[$invoice->currency]['precision']));
+                $params['items'][] = $rebill;
             }
         }
 
