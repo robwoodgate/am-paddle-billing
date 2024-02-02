@@ -350,29 +350,27 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     {
         // Get subscription
         $subscription_id = $invoice->data()->get(static::SUBSCRIPTION_ID);
-        if ($subscription_id) {
-            // * Prepare log
-            $log = $this->getDi()->invoiceLogRecord;
-            $log->title = 'CANCEL';
-            $log->user_id = $invoice->user_id;
-            $log->invoice_id = $invoice->pk();
-
-            // * Make request
-            $response = $this->_sendRequest(
-                '/subscription/users_cancel',
-                ['subscription_id' => $subscription_id],
-                $log
-            );
-            $resp_data = @json_decode($response->getBody(), true);
-            if (!$resp_data['success']) {
-                $result->setFailed('Cancellation request failed: '.$resp_data['error']['message']);
-
-                return $result;
-            }
-            $result->setSuccess();
-        } else {
+        if (!$subscription_id) {
             $result->setFailed('Can not find subscription id');
         }
+        // * Prepare log
+        $log = $this->getDi()->invoiceLogRecord;
+        $log->title = 'CANCEL';
+        $log->user_id = $invoice->user_id;
+        $log->invoice_id = $invoice->pk();
+
+        // * Make request
+        $response = $this->_sendRequest(
+            "subscriptions/{$subscription_id}/cancel",
+            ['effective_from' => 'immediately'],
+            $log
+        );
+        if ($response->getStatus() !== 200) {
+          throw new Am_Exception_InputError('An error occurred while processing your cancellation request');
+        }
+
+        $invoice->setCancelled(true);
+        $result->setSuccess();
     }
 
     public function processRefund(InvoicePayment $payment, Am_Paysystem_Result $result, $amount)
@@ -389,7 +387,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
         // * Get refund type
         $type = 'partial';
-        if(doubleval($amount) == doubleval($payment->amount)){
+        if (doubleval($amount) == doubleval($payment->amount)) {
             $type = 'full';
         }
 
@@ -401,7 +399,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 'items' => [
                     'type' => $type,
                     'amount' => $this->getAmount($amount, $invoice->currency),
-                    //'item_id' => @TODO: txnitm_abc123
+                    // 'item_id' => @TODO: txnitm_abc123
                 ],
                 'transaction_id' => $payment->receipt_id,
                 'reason' => 'Refund requested by user ('.$payment->getUser()->login.')',
