@@ -223,7 +223,10 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                     'name' => ($item->first_total) ? ___('First Payment') : ___('Free'),
                     'tax_mode' => 'account_setting',
                     'unit_price' => [
-                        'amount' => (string) ($item->first_total * pow(10, Am_Currency::$currencyList[$invoice->currency]['precision'])),
+                        'amount' => (string) $this->getAmount(
+                            $item->first_total,
+                            $invoice->currency
+                        ),
                         'currency_code' => $item->currency,
                     ],
                     'product' => [
@@ -246,7 +249,10 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                     'interval' => 'day',
                     'frequency' => $this->getDays($item->first_period),
                 ];
-                $rebill['price']['unit_price']['amount'] = (string) ($item->second_total * pow(10, Am_Currency::$currencyList[$invoice->currency]['precision']));
+                $rebill['price']['unit_price']['amount'] = (string) $this->getAmount(
+                    $item->second_total,
+                    $invoice->currency
+                );
                 $params['items'][] = $rebill;
             }
         }
@@ -381,12 +387,23 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $log->user_id = $invoice->user_id;
         $log->invoice_id = $invoice->pk();
 
+        // * Get refund type
+        $type = 'partial';
+        if(doubleval($amount) == doubleval($payment->amount)){
+            $type = 'full';
+        }
+
         // * Make request
         $response = $this->_sendRequest(
-            '/payment/refund',
+            '/adjustments',
             [
-                'order_id' => $payment->receipt_id,
-                // 'amount'   => $amount, // disabled @see allowPartialRefunds()
+                'action' => 'refund',
+                'items' => [
+                    'type' => $type,
+                    'amount' => $this->getAmount($amount, $invoice->currency),
+                    //'item_id' => @TODO: txnitm_abc123
+                ],
+                'transaction_id' => $payment->receipt_id,
                 'reason' => 'Refund requested by user ('.$payment->getUser()->login.')',
             ],
             $log
@@ -448,6 +465,11 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         }
 
         return null;
+    }
+
+    protected function getAmount($amount, $currency = 'USD')
+    {
+        return $amount * pow(10, Am_Currency::$currencyList[$currency]['precision']);
     }
 
     protected function getFrequency($period)
