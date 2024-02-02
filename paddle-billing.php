@@ -346,6 +346,22 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         return new Am_Paysystem_PaddleBilling_Transaction($this, $request, $response, $invokeArgs);
     }
 
+    public function directAction($request, $response, $invokeArgs)
+    {
+        // Default payment page
+        if ('pay' == $request->getActionName()) {
+            $view = $this->getDi()->view;
+            $view->title = ___('Paddle Billing Checkout');
+            $view->content = $this->paddleJsSetupCode();
+            $view->display('member/layout.phtml');
+
+            return;
+        }
+
+        // Let parent process it
+        return parent::directAction($request, $response, $invokeArgs);
+    }
+
     public function cancelAction(Invoice $invoice, $actionName, Am_Paysystem_Result $result)
     {
         // Get subscription
@@ -365,8 +381,8 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             ['effective_from' => 'immediately'],
             $log
         );
-        if ($response->getStatus() !== 200) {
-          throw new Am_Exception_InputError('An error occurred while processing your cancellation request');
+        if (200 !== $response->getStatus()) {
+            throw new Am_Exception_InputError('An error occurred while processing your cancellation request');
         }
 
         $invoice->setCancelled(true);
@@ -516,18 +532,18 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $retain_key = $this->getConfig('retain_key');
         $retain_key = $retain_key ? 'pwAuth: "'.$retain_key.'",' : '';
         $txnid = $resp_data['data']['id'];
-        $thanks_url = $this->getReturnUrl();
+        $thanks_url = '';
         $code = <<<CUT
             <div class="checkout-container"></div>
             <script>
                 {$environment}
                 Paddle.Setup({
                     token: "{$client_token}",
-                    {$retain_key},
+                    {$retain_key}
                     pwCustomer: {email: "{$email}"}, // can pass the id or email of your logged-in customer
                     checkout: {
                         settings: {
-                            displayMode: "inline",
+                            displayMode: "overlay",
                             theme: "light",
                             locale: "en",
                             frameTarget: "checkout-container",
@@ -558,6 +574,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             </script>
             CUT;
 
+        // Append Paddle JS to head
         $v = new Am_View();
         $v->headScript()->appendFile('https://cdn.paddle.com/paddle/v2/paddle.js');
 
@@ -677,7 +694,7 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
         parse_str(str_replace(';', '&', $raw_sig), $sig);
 
         // Build payload
-        $payload = $sig['ts'].':'.$request->getRawBody();
+        $payload = $sig['ts'].':'.$this->request->getRawBody();
 
         return $sig['h1'] === hash_hmac(
             'sha256',
