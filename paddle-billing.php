@@ -262,18 +262,11 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $a = new Am_Paysystem_Action_HtmlTemplate('pay.phtml');
 
         $a->invoice = $invoice;
-        $taxind_msg = ___('Converted prices include VAT');
-        $conversion_msg = sprintf(
-            '%1$s (<span id="paddle_currency">%2$s</span> %3$s)',
-            ___('Invoice Summary'),
-            $invoice->currency,
-            ___('Conversion')
-        );
+        $environment = $this->isSandbox() ? 'Paddle.Environment.set("sandbox");' : '';
         $client_token = $this->getConfig('client_token');
-        $environment = $this->isSandbox() ? 'sandbox' : 'production';
-        $txnid = $resp_data['data']['id'];
         $retain_key = $this->getConfig('retain_key')
             ? '"'.$this->getConfig('retain_key').'"' : 'null';
+        $txnid = $resp_data['data']['id'];
         $thanks_url = $this->getReturnUrl();
         $name = $invoice->getName();
         $email = $invoice->getEmail();
@@ -283,7 +276,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $a->form = <<<CUT
             <div class="checkout-container"></div>
             <script>
-                Paddle.Environment.set("{$environment}"); // sandbox|production
+                $environment
                 Paddle.Setup({
                     token: "{$client_token}", // replace with a client-side token
                     pwAuth: {$retain_key}, // replace with your Retain API key
