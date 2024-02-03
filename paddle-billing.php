@@ -22,10 +22,11 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     public const SUBSCRIPTION_ID = 'paddlebilling_subscription_id';
     public const PMT_RECEIPT_URL = 'paddlebilling_receipt_url';
     public const CARD_UPDATE_URL = 'paddlebilling_update_url';
-    public const CATALOG_ID = 'paddlebilling_prod_id';
+    public const PRICE_ID = 'paddle-billing_price_id';
     public const LIVE_URL = 'https://api.paddle.com/';
     public const SANDBOX_URL = 'https://sandbox-api.paddle.com/';
     public const CUST_DATA_INV = 'am_invoice';
+    public const TXNITM = 'paddle-billing_txnitm';
     public const API_VERSION = 1;
 
     protected $defaultTitle = 'Paddle Billing';
@@ -37,9 +38,11 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     {
         $this->getDi()->billingPlanTable->customFields()->add(
             new Am_CustomFieldText(
-                static::CATALOG_ID,
-                'Paddle Subscription Plan ID',
-                "Recurring billing plans *MUST* have a Paddle Subscription Plan with the SAME 'Second Period' and same default currency. Product IDs are optional for single payment billing plans, but if provided must have same default currency."
+                static::PRICE_ID,
+                'Paddle Billing: Price ID',
+                'Optional. Lets you link and use Paddle Catalog items you have created. Only required if you accept direct payments.',
+                null,
+                ['placeholder' => 'pri_abc123']
             )
         );
         $this->getDi()->blocks->add(
@@ -63,6 +66,13 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
     public function onBeforeRender(Am_Event $e): void
     {
+        // Add PaddleJS to member home/signup forms
+        static $init = 0;
+        if (!$init++) {
+            $e->getView()->placeholder('head-start')->prepend('<script id="paddle-billing-js" src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>');
+            $e->getView()->placeholder('body-start')->prepend($this->paddleJsSetupCode());
+        }
+
         // Inject Paddle Payment Update URL into detailed subscriptions widget
         if (false !== strpos($e->getTemplateName(), 'blocks/member-history-detailedsubscriptions')) {
             $v = $e->getView();
@@ -223,7 +233,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                     'name' => ($item->first_total) ? ___('First Payment') : ___('Free'),
                     'tax_mode' => 'account_setting',
                     'unit_price' => [
-                        'amount' => (string) $this->getAmount(
+                        'amount' => $this->getAmount(
                             $item->first_total,
                             $invoice->currency
                         ),
@@ -249,7 +259,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                     'interval' => 'day',
                     'frequency' => $this->getDays($item->first_period),
                 ];
-                $rebill['price']['unit_price']['amount'] = (string) $this->getAmount(
+                $rebill['price']['unit_price']['amount'] = $this->getAmount(
                     $item->second_total,
                     $invoice->currency
                 );
@@ -284,44 +294,22 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             <div class="checkout-container"></div>
             <script>
                 {$environment}
-                Paddle.Setup({
-                    token: "{$client_token}", // replace with a client-side token
-                    pwAuth: {$retain_key}, // replace with your Retain API key
-                    pwCustomer: {email: "{$email}"}, // can pass the id or email of your logged-in customer
-                    checkout: {
-                        settings: {
-                            displayMode: "inline",
-                            theme: "light",
-                            locale: "en",
-                            frameTarget: "checkout-container",
-                            frameInitialHeight: "450",
-                            frameStyle: "width: 100%; min-width: 312px; background-color: transparent; border: none;",
-                            showAddTaxId: true,
-                            allowLogout: false,
-                            showAddDiscounts: false,
-                            successUrl: "{$thanks_url}",
-                        }
-                    },
-                    eventCallback: function(data) {
-                        switch(data.name) {
-                          case "checkout.loaded":
-                            console.log("Checkout opened");
-                            break;
-                          case "checkout.customer.created":
-                            console.log("Customer created");
-                            break;
-                          case "checkout.completed":
-                            console.log("Checkout completed");
-                            break;
-                          default:
-                            console.log(data);
-                        }
-                    }
-                });
                 Paddle.Checkout.open({
                     transactionId: "{$txnid}",
                     successUrl: "{$thanks_url}",
                     customData: null,
+                    settings: {
+                        displayMode: "inline",
+                        theme: "light",
+                        locale: "en",
+                        frameTarget: "checkout-container",
+                        frameInitialHeight: "450",
+                        frameStyle: "width: 100%; min-width: 312px; background-color: transparent; border: none;",
+                        showAddTaxId: true,
+                        allowLogout: false,
+                        showAddDiscounts: false,
+                        successUrl: "{$thanks_url}",
+                    },
                     customer: {
                         email: "{$email}", // req
                         address: {
@@ -352,7 +340,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         if ('pay' == $request->getActionName()) {
             $view = $this->getDi()->view;
             $view->title = ___('Paddle Billing Checkout');
-            $view->content = $this->paddleJsSetupCode();
             $view->display('member/layout.phtml');
 
             return;
@@ -381,8 +368,9 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             ['effective_from' => 'immediately'],
             $log
         );
+        $resp_data = @json_decode($response->getBody(), true);
         if (200 !== $response->getStatus()) {
-            throw new Am_Exception_InputError('An error occurred while processing your cancellation request');
+            throw new Am_Exception_InputError('An error occurred while processing your cancellation request: '. $resp_data['error']['detail']);
         }
 
         $invoice->setCancelled(true);
@@ -407,26 +395,38 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             $type = 'full';
         }
 
+        // * Multi-item partial refunds must be handled via Paddle
+        // * because we can't allocate the refund amount to items here
+        $invoice_items = $invoice->getItems();
+        if ('partial' == $type && $invoice_items > 1) {
+            throw new Am_Exception_InputError('Partial refunds for multi-product invoices must be requested from your Paddle account');
+        }
+
+        // * Get the Paddle Transaction Item(s)
+        $items = [];
+        foreach ($invoice_items as $invoice_item) {
+            $txnitm = $invoice_item->data()->get(self::TXNITM);
+            $items[] = [
+                'type' => $type,
+                'amount' => $this->getAmount($amount, $invoice->currency),
+                'item_id' => $txnitm
+            ];
+        }
+
         // * Make request
         $response = $this->_sendRequest(
             '/adjustments',
             [
                 'action' => 'refund',
-                'items' => [
-                    'type' => $type,
-                    'amount' => $this->getAmount($amount, $invoice->currency),
-                    // 'item_id' => @TODO: txnitm_abc123
-                ],
+                'items' => $items,
                 'transaction_id' => $payment->receipt_id,
                 'reason' => 'Refund requested by user ('.$payment->getUser()->login.')',
             ],
             $log
         );
         $resp_data = @json_decode($response->getBody(), true);
-        if (!$resp_data['success']) {
-            $result->setFailed('Refund request failed: '.$resp_data['error']['message']);
-
-            return $result;
+        if (200 !== $response->getStatus()) {
+            throw new Am_Exception_InputError('An error occurred while processing your refund request: '. $resp_data['error']['detail']);
         }
 
         $result->setSuccess();
@@ -443,11 +443,11 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             return;
         }
         $grid = $event->getGrid();
-        $grid->addField(new Am_Grid_Field(static::CATALOG_ID, ___('Paddle ID'), false, 'right'))
+        $grid->addField(new Am_Grid_Field(static::PRICE_ID, ___('Paddle ID'), false, 'right'))
             ->setRenderFunction(function (Product $product) {
                 $ret = [];
                 foreach ($product->getBillingPlans() as $plan) {
-                    $data = $plan->data()->get(static::CATALOG_ID);
+                    $data = $plan->data()->get(static::PRICE_ID);
                     $ret[] = ($data) ? $data : '&ndash;';
                 }
                 $ret = implode('<br />', $ret);
@@ -481,9 +481,9 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         return null;
     }
 
-    protected function getAmount($amount, $currency = 'USD')
+    protected function getAmount($amount, $currency = 'USD'): string
     {
-        return $amount * pow(10, Am_Currency::$currencyList[$currency]['precision']);
+        return (string) ($amount * pow(10, Am_Currency::$currencyList[$currency]['precision']));
     }
 
     protected function getFrequency($period)
@@ -525,34 +525,32 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         }
     }
 
-    protected function paddleJsSetupCode($email = '')
+    protected function paddleJsSetupCode()
     {
         $environment = $this->isSandbox() ? 'Paddle.Environment.set("sandbox");' : '';
         $client_token = $this->getConfig('client_token');
         $retain_key = $this->getConfig('retain_key');
-        $retain_key = $retain_key ? 'pwAuth: "'.$retain_key.'",' : '';
+        $retain_key = $retain_key ? '"'.$retain_key.'"' : 'null';
         $txnid = $resp_data['data']['id'];
         $thanks_url = '';
+        $user = $this->getDi()->auth->getUser();
+        $email = ($user instanceof User) ? 'email: "'.$user->email.'"' : '';
         $code = <<<CUT
-            <div class="checkout-container"></div>
             <script>
                 {$environment}
                 Paddle.Setup({
                     token: "{$client_token}",
-                    {$retain_key}
-                    pwCustomer: {email: "{$email}"}, // can pass the id or email of your logged-in customer
+                    pwAuth: {$retain_key},
+                    pwCustomer: {{$email}},
                     checkout: {
                         settings: {
                             displayMode: "overlay",
                             theme: "light",
                             locale: "en",
-                            frameTarget: "checkout-container",
-                            frameInitialHeight: "450",
-                            frameStyle: "width: 100%; min-width: 312px; background-color: transparent; border: none;",
                             showAddTaxId: true,
                             allowLogout: false,
                             showAddDiscounts: false,
-                            successUrl: "{$thanks_url}",
+                            // successUrl: "{$thanks_url}",
                         }
                     },
                     eventCallback: function(data) {
@@ -573,10 +571,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 });
             </script>
             CUT;
-
-        // Append Paddle JS to head
-        $v = new Am_View();
-        $v->headScript()->appendFile('https://cdn.paddle.com/paddle/v2/paddle.js');
 
         return $code;
     }
@@ -666,7 +660,7 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
             return;
         }
         $billing_plan = $this->getPlugin()->getDi()->billingPlanTable->findFirstByData(
-            Am_Paysystem_Paddle::CATALOG_ID,
+            Am_Paysystem_Paddle::PRICE_ID,
             $item_name
         );
         if ($billing_plan) {
