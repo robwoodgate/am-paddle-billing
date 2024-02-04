@@ -221,23 +221,45 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // Add invoice items to Paddle Transaction
         // @var $item InvoiceItem
         foreach ($invoice->getItems() as $item) {
+            class_exists('Am_Utils', true); // autoload functions
+
+            // Init vars
+            $rebill = null;
+            $fptext = ': '.$this->getText($item->first_period);
+
             // Try get product specific image, fall back to default if needed
             $image_url = $item->tryLoadProduct()->img_cart_path ?? $default_img;
             $terms = $item->tryLoadProduct()->getBillingPlan()->getTerms();
 
-            // Add first payment info
-            $params['items'][] = $rebill = [
+            // Build the core transaction item payload
+            $txnitm = [
                 'quantity' => $item->qty,
                 'price' => [
                     'description' => $terms,
-                    'name' => ($item->first_total) ? ___('First Payment') : ___('Free'),
+                    'name' => ___('Subscription').$fptext,
+                    'billing_cycle' => [
+                        'interval' => $this->getInterval($item->second_period),
+                        'frequency' => $this->getFrequency($item->second_period),
+                    ],
+                    'trial_period' => [
+                        'interval' => $this->getInterval($item->first_period),
+                        'frequency' => $this->getFrequency($item->first_period),
+                    ],
                     'tax_mode' => 'account_setting',
                     'unit_price' => [
                         'amount' => $this->getAmount(
-                            $item->first_total,
-                            $invoice->currency
+                            $item->second_total,
+                            $item->currency
                         ),
                         'currency_code' => $item->currency,
+                    ],
+                    'quantity' => [
+                        'minimum' => $item->qty,
+                        'maximum' => $item->qty,
+                    ],
+                    'custom_data' => [
+                        'invoice_item' => $item->item_id,
+                        'period' => 'first_period',
                     ],
                     'product' => [
                         'name' => $item->item_title,
@@ -248,23 +270,55 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 ],
             ];
 
-            // Add rebill info
-            if ($item->second_period) {
-                $rebill['price']['name'] = ___('Second and Subsequent Payments');
-                $rebill['price']['billing_cycle'] = [
-                    'interval' => $this->getInterval($item->second_period),
-                    'frequency' => $this->getFrequency($item->second_period),
-                ];
-                $rebill['price']['trial_period'] = [
-                    'interval' => 'day',
-                    'frequency' => $this->getDays($item->first_period),
-                ];
-                $rebill['price']['unit_price']['amount'] = $this->getAmount(
-                    $item->second_total,
-                    $invoice->currency
-                );
-                $params['items'][] = $rebill;
+            // Handle free first period products (free trials)
+            // Use the core transaction item payload as is
+            if (!$item->first_total) {
+                $params['items'][] = $txnitm;
+
+                continue;
             }
+
+            // Handle simple rebills (same first and second price/period)
+            if ($item->first_total == $item->second_total
+                && $item->first_period == $item->second_period
+            ) {
+                unset($txnitm['price']['trial_period']);
+                $params['items'][] = $txnitm;
+
+                continue;
+            }
+
+            // Handle one-time payments (ie: no rebill/trial)
+            if (!$item->second_period) {
+                $txnitm['price']['name'] = (($item->first_total)
+                    ? ___('Purchase') : ___('Free')).$fptext;
+                unset($txnitm['price']['billing_cycle'], $txnitm['price']['trial_period']);
+
+                $txnitm['price']['unit_price']['amount'] = $this->getAmount(
+                    $item->first_total,
+                    $item->currency
+                );
+                $params['items'][] = $txnitm;
+
+                continue;
+            }
+
+            // Handle complex rebills (different first and second price/period)
+            // Paddle doesn't support subscriptions with different prices/periods
+            // so we have to treat the first period as a one-time payment
+            // and add the second period as a seperate item starting
+            // at the end of the first period using a Paddle Trial.
+            $rebill = $txnitm; // Copy core transaction item
+            $txnitm['price']['name'] = ___('First Period').$fptext;
+            $rebill['price']['name'] = ___('Second Period').': '.$this->getText($item->second_period);
+            $txnitm['price']['unit_price']['amount'] = $this->getAmount(
+                $item->first_total,
+                $item->currency
+            );
+            unset($txnitm['price']['billing_cycle'], $txnitm['price']['trial_period']);
+            $rebill['price']['custom_data']['period'] = 'second_period';
+            $params['items'][] = $txnitm;
+            $params['items'][] = $rebill;
         }
 
         // * Generate the draft transaction
@@ -273,8 +327,15 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // * Decode and check transaction ID
         $resp_data = @json_decode($response->getBody(), true);
         if (empty($resp_data['data']['id'])) {
-            throw new Am_Exception_InternalError('Bad response: '.$resp_data);
+            throw new Am_Exception_InternalError('Bad response: '.$response->getBody());
         }
+
+        // * Save the line items
+        $line_items = [];
+        foreach ($resp_data['data']['details']['line_items'] as $txnitm) {
+            $line_items[] = $txnitm['id'];
+        }
+        $invoice->data()->set(self::TXNITM, $line_items)->update();
 
         // * Open pay page
         $a = new Am_Paysystem_Action_HtmlTemplate('pay.phtml');
@@ -299,7 +360,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                     successUrl: "{$thanks_url}",
                     customData: null,
                     settings: {
-                        displayMode: "inline",
+                        displayMode: "overlay",
                         theme: "light",
                         locale: "en",
                         frameTarget: "checkout-container",
@@ -370,7 +431,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         );
         $resp_data = @json_decode($response->getBody(), true);
         if (200 !== $response->getStatus()) {
-            throw new Am_Exception_InputError('An error occurred while processing your cancellation request: '. $resp_data['error']['detail']);
+            throw new Am_Exception_InputError('An error occurred while processing your cancellation request: '.$resp_data['error']['detail']);
         }
 
         $invoice->setCancelled(true);
@@ -405,12 +466,14 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // * Get the Paddle Transaction Item(s)
         $items = [];
         foreach ($invoice_items as $invoice_item) {
-            $txnitm = $invoice_item->data()->get(self::TXNITM);
-            $items[] = [
-                'type' => $type,
-                'amount' => $this->getAmount($amount, $invoice->currency),
-                'item_id' => $txnitm
-            ];
+            $txnitms = $invoice_item->data()->get(self::TXNITM);
+            foreach ($txnitms as $txnitm) {
+                $items[] = [
+                    'type' => $type,
+                    'amount' => $this->getAmount($amount, $invoice->currency),
+                    'item_id' => $txnitm,
+                ];
+            }
         }
 
         // * Make request
@@ -426,7 +489,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         );
         $resp_data = @json_decode($response->getBody(), true);
         if (200 !== $response->getStatus()) {
-            throw new Am_Exception_InputError('An error occurred while processing your refund request: '. $resp_data['error']['detail']);
+            throw new Am_Exception_InputError('An error occurred while processing your refund request: '.$resp_data['error']['detail']);
         }
 
         $result->setSuccess();
@@ -486,29 +549,50 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         return (string) ($amount * pow(10, Am_Currency::$currencyList[$currency]['precision']));
     }
 
+    protected function getText($period)
+    {
+        // Convert string if needed
+        if (!$period instanceof Am_Period) {
+            $period = new Am_Period($period);
+        }
+
+        return ucwords($period->getText());
+    }
+
     protected function getFrequency($period)
     {
-        $period = new Am_Period($period);
+        // Convert string if needed
+        if (!$period instanceof Am_Period) {
+            $period = new Am_Period($period);
+        }
+        if (Am_Period::FIXED == $period->getUnit()) {
+            return $this->getDays($period);
+        }
 
         return $period->getCount();
     }
 
     protected function getInterval($period)
     {
-        $period = new Am_Period($period);
+        // Convert string if needed
+        if (!$period instanceof Am_Period) {
+            $period = new Am_Period($period);
+        }
         $map = [
             Am_Period::DAY => 'day',
             Am_Period::MONTH => 'month',
             Am_Period::YEAR => 'year',
         ];
 
-        return $map[$period->getUnit()]
-            ?? throw new Am_Exception_InternalError("Unsupported period: {$period}");
+        return $map[$period->getUnit()] ?? 'year';
     }
 
     protected function getDays($period)
     {
-        $period = new Am_Period($period);
+        // Convert string if needed
+        if (!$period instanceof Am_Period) {
+            $period = new Am_Period($period);
+        }
 
         switch ($period->getUnit()) {
             case Am_Period::DAY:
@@ -521,7 +605,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 return $period->getCount() * 365;
 
             default:
-                return 0; // actual value in this case does not matter
+                return 10; // actual value in this case does not matter
         }
     }
 
@@ -532,10 +616,10 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $retain_key = $this->getConfig('retain_key');
         $retain_key = $retain_key ? '"'.$retain_key.'"' : 'null';
         $txnid = $resp_data['data']['id'];
-        $thanks_url = '';
         $user = $this->getDi()->auth->getUser();
         $email = ($user instanceof User) ? 'email: "'.$user->email.'"' : '';
-        $code = <<<CUT
+
+        return <<<CUT
             <script>
                 {$environment}
                 Paddle.Setup({
@@ -550,7 +634,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                             showAddTaxId: true,
                             allowLogout: false,
                             showAddDiscounts: false,
-                            // successUrl: "{$thanks_url}",
                         }
                     },
                     eventCallback: function(data) {
@@ -571,8 +654,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 });
             </script>
             CUT;
-
-        return $code;
     }
 
     /**
