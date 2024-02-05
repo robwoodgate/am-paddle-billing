@@ -117,18 +117,22 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     public function _initSetupForm(Am_Form_Setup $form): void
     {
         $form->addSecretText('api_key', ['class' => 'am-el-wide'])
-            ->setLabel("API Key\n".'Use your default API key or generate a new one from the Developer Tools > <a href="https://vendors.paddle.com/authentication-v2">Authentication menu</a> menu of your Paddle Dashboard.')
+            ->setLabel("API Key\n".'Use your default API key or generate a new one from the Developer Tools > <a href="https://vendors.paddle.com/authentication-v2" target="_blank">Authentication menu</a> menu of your Paddle Dashboard.')
             ->addRule('required')
         ;
 
         $form->addSecretText('client_token', ['class' => 'am-el-wide'])
-            ->setLabel("Client-Side Token\n".'From the Developer Tools > <a href="https://vendors.paddle.com/authentication-v2">Authentication menu</a> of your Paddle Dashboard.')
+            ->setLabel("Client-Side Token\n".'From the Developer Tools > <a href="https://vendors.paddle.com/authentication-v2" target="_blank">Authentication menu</a> of your Paddle Dashboard.')
             ->addRule('required')
         ;
 
         $form->addSecretText('secret_key', ['class' => 'am-el-wide'])
-            ->setLabel("Webhook Secret Key\n".'From the Developer Tools > <a href="https://vendors.paddle.com/notifications">Notifications menu</a> of your Paddle Dashboard. <a href="https://developer.paddle.com/webhooks/signature-verification#get-secret-key">Detailed Instructions</a>')
+            ->setLabel("Webhook Secret Key\n".'From the Developer Tools > <a href="https://vendors.paddle.com/notifications" target="_blank">Notifications menu</a> of your Paddle Dashboard. <a href="https://developer.paddle.com/webhooks/signature-verification#get-secret-key" target="_blank">Detailed Instructions</a>')
             ->addRule('required')
+        ;
+
+        $form->addSecretText('retain_key', ['class' => 'am-el-wide'])
+            ->setLabel("Retain Public Token (Optional)\n".'From the Retain > Account Settings > <a href="https://www2.profitwell.com/app/account/integrations" target="_blank">Integrations</a> > API keys/Dev Kit of your Paddle Dashboard.')
         ;
 
         // Add Sandbox warning
@@ -325,17 +329,10 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $response = $this->_sendRequest('transactions', $params, $log);
 
         // * Decode and check transaction ID
-        $resp_data = @json_decode($response->getBody(), true);
-        if (empty($resp_data['data']['id'])) {
+        $body = @json_decode($response->getBody(), true);
+        if (empty($body['data']['id'])) {
             throw new Am_Exception_InternalError('Bad response: '.$response->getBody());
         }
-
-        // * Save the line items
-        $line_items = [];
-        foreach ($resp_data['data']['details']['line_items'] as $txnitm) {
-            $line_items[] = $txnitm['id'];
-        }
-        $invoice->data()->set(self::TXNITM, $line_items)->update();
 
         // * Open pay page
         $a = new Am_Paysystem_Action_HtmlTemplate('pay.phtml');
@@ -344,7 +341,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $client_token = $this->getConfig('client_token');
         $retain_key = $this->getConfig('retain_key')
             ? '"'.$this->getConfig('retain_key').'"' : 'null';
-        $txnid = $resp_data['data']['id'];
+        $txnid = $body['data']['id'];
         $thanks_url = $this->getReturnUrl();
         $name = $invoice->getName();
         $email = $invoice->getEmail();
@@ -429,9 +426,10 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             ['effective_from' => 'immediately'],
             $log
         );
-        $resp_data = @json_decode($response->getBody(), true);
+        $body = @json_decode($response->getBody(), true);
         if (200 !== $response->getStatus()) {
-            throw new Am_Exception_InputError('An error occurred while processing your cancellation request: '.$resp_data['error']['detail']);
+            $result->setFailed('An error occurred while processing your cancellation request: '.$body['error']['detail']);
+            return;
         }
 
         $invoice->setCancelled(true);
@@ -456,29 +454,33 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             $type = 'full';
         }
 
-        // * Multi-item partial refunds must be handled via Paddle
-        // * because we can't allocate the refund amount to items here
-        $invoice_items = $invoice->getItems();
-        if ('partial' == $type && $invoice_items > 1) {
-            throw new Am_Exception_InputError('Partial refunds for multi-product invoices must be requested from your Paddle account');
+        // * Get the Paddle Transaction Item(s)
+        // * and build the items payload
+        $items = [];
+        $txnitms = $invoice->data()->get(self::TXNITM);
+        foreach ($txnitms as $txnitm) {
+            $items[] = [
+                'type' => $type,
+                'item_id' => $txnitm,
+            ];
         }
 
-        // * Get the Paddle Transaction Item(s)
-        $items = [];
-        foreach ($invoice_items as $invoice_item) {
-            $txnitms = $invoice_item->data()->get(self::TXNITM);
-            foreach ($txnitms as $txnitm) {
-                $items[] = [
-                    'type' => $type,
-                    'amount' => $this->getAmount($amount, $invoice->currency),
-                    'item_id' => $txnitm,
-                ];
+        // * Multi-item partial refunds must be handled via Paddle
+        // * because we can't allocate the refund amount to items here
+        // * Otherwise, add the amount for a partial refund
+        if ('partial' == $type) {
+            $items[0]['amount'] = $this->getAmount($amount, $invoice->currency);
+
+            if (count($items) > 1) {
+                $result->setFailed('Partial refunds for multi-product invoices must be requested from your Paddle account');
+
+                return;
             }
         }
 
         // * Make request
         $response = $this->_sendRequest(
-            '/adjustments',
+            'adjustments',
             [
                 'action' => 'refund',
                 'items' => $items,
@@ -487,9 +489,11 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             ],
             $log
         );
-        $resp_data = @json_decode($response->getBody(), true);
+        $body = @json_decode($response->getBody(), true);
         if (200 !== $response->getStatus()) {
-            throw new Am_Exception_InputError('An error occurred while processing your refund request: '.$resp_data['error']['detail']);
+            $result->setFailed('An error occurred while processing your refund request: '.$body['error']['detail']);
+
+            return;
         }
 
         $result->setSuccess();
@@ -615,7 +619,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $client_token = $this->getConfig('client_token');
         $retain_key = $this->getConfig('retain_key');
         $retain_key = $retain_key ? '"'.$retain_key.'"' : 'null';
-        $txnid = $resp_data['data']['id'];
         $user = $this->getDi()->auth->getUser();
         $email = ($user instanceof User) ? 'email: "'.$user->email.'"' : '';
 
@@ -841,7 +844,17 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
                 break;
 
             case 'subscription_payment_succeeded':
-            case 'transaction.paid':
+            case 'transaction.completed':
+                //Save the billed line items in case of refund
+                // * @see processRefund()
+                $line_items = [];
+                foreach ($this->event['data']['details']['line_items'] as $txnitm) {
+                    if ($txnitm['totals']['total'] > 0) {
+                        $line_items[] = $txnitm['id'];
+                    }
+                }
+                $this->invoice->data()->set(self::TXNITM, $line_items)->update();
+
                 // Update user country if needed
                 $user = $this->invoice->getUser();
                 $country = $this->request->getPost('country');
