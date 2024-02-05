@@ -25,6 +25,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     public const PRICE_ID = 'paddle-billing_price_id';
     public const LIVE_URL = 'https://api.paddle.com/';
     public const SANDBOX_URL = 'https://sandbox-api.paddle.com/';
+    public const PADDLEJS_URL = 'https://cdn.paddle.com/paddle/v2/paddle.js';
     public const CUST_DATA_INV = 'am_invoice';
     public const TXNITM = 'paddle-billing_txnitm';
     public const API_VERSION = 1;
@@ -69,7 +70,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // Add PaddleJS to member home/signup forms
         static $init = 0;
         if (!$init++) {
-            $e->getView()->placeholder('head-start')->prepend('<script id="paddle-billing-js" src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>');
+            $e->getView()->placeholder('head-start')->prepend('<script id="paddle-billing-js" src="'.self::PADDLEJS_URL.'"></script>');
             $e->getView()->placeholder('body-start')->prepend($this->paddleJsSetupCode());
         }
 
@@ -86,15 +87,19 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             }
         }
 
-        // @TODO
-        // Inject Paddle receipt link into payment history widget
+        // Inject Paddle receipt download link into payment history widget
         if (false !== strpos($e->getTemplateName(), 'blocks/member-history-paymenttable')) {
             $v = $e->getView();
             foreach ($v->payments as &$p) {
                 if ($p->paysys_id == $this->getId()) {
-                    if ($_ = $p->data()->get(static::PMT_RECEIPT_URL)) {
-                        $p->_invoice_url = $_;
-                    }
+                    $invoice = $p->getInvoice();
+                    $p->_invoice_url = $this->getDi()->url(
+                        'payment/'.$this->getId().'/invoice',
+                        [
+                            'id' => $invoice->getSecureId($this->getId()),
+                            'txn' => $p->receipt_id,
+                        ]
+                    );
                 }
             }
         }
@@ -403,6 +408,46 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             $view->display('member/layout.phtml');
 
             return;
+        }
+
+        // Download Invoice
+        if ('invoice' == $request->getActionName()) {
+            // Get vars
+            $inv_id = $request->getFiltered('id');
+            $txn_id = $request->getFiltered('txn');
+            $invoice = $this->getDi()->invoiceTable->findBySecureId($inv_id, $this->getId());
+            if (!$invoice) {
+                throw new Am_Exception_InputError('Invalid link');
+            }
+
+            // * Prepare log
+            $log = $this->getDi()->invoiceLogRecord;
+            $log->title = 'PDF INVOICE';
+            $log->user_id = $invoice->user_id;
+            $log->invoice_id = $invoice->pk();
+
+            // * Make request
+            $response = $this->_sendRequest(
+                "transactions/{$txn_id}/invoice",
+                null,
+                $log,
+                Am_HttpRequest::METHOD_GET
+            );
+
+            // * Check response
+            $body = @json_decode($response->getBody(), true);
+            if (200 !== $response->getStatus() || empty($body['data']['url'])) {
+                throw new Am_Exception_InputError('An error occurred while downloading: '.$body['error']['detail']);
+            }
+
+            // Download PDF
+            set_time_limit(0);
+            ini_set('memory_limit', AM_HEAVY_MEMORY_LIMIT);
+            header("Content-Type: application/pdf");
+            $filename = strtok(basename($body['data']['url']), '?');
+            header("Content-Disposition: attachment; filename=$filename");
+            readfile($body['data']['url']);
+            exit;
         }
 
         // Let parent process it
@@ -870,7 +915,7 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
         return true;
     }
 
-    //@TODO
+    // @TODO
     public function processValidated(): void
     {
         // * Save subscription ID if set
