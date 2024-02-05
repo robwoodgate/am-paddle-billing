@@ -382,8 +382,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             </script>
             CUT;
 
-        $v = new Am_View();
-        $v->headScript()->appendFile('https://cdn.paddle.com/paddle/v2/paddle.js');
         $result->setAction($a);
     }
 
