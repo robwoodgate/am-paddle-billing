@@ -123,6 +123,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
     public function getSupportedCurrencies()
     {
+        // @see https://developer.paddle.com/concepts/sell/supported-currencies
         return ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'HKD', 'SGD', 'SEK', 'ARS', 'BRL', 'CNY', 'COP', 'CZK', 'DKK', 'HUF', 'ILS', 'INR', 'KRW', 'MXN', 'NOK', 'NZD', 'PLN', 'RUB', 'THB', 'TRY', 'TWD', 'UAH'];
     }
 
@@ -238,7 +239,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // Add invoice items to Paddle Transaction
         // @var $item InvoiceItem
         foreach ($invoice->getItems() as $item) {
-            class_exists('Am_Utils', true); // autoload functions
 
             // Init vars
             $rebill = null;
@@ -500,6 +500,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $subscription_id = $invoice->data()->get(static::SUBSCRIPTION_ID);
         if (!$subscription_id) {
             $result->setFailed('Can not find subscription id');
+
             return;
         }
         // * Prepare log
