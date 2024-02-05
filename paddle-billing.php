@@ -73,6 +73,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             $e->getView()->placeholder('body-start')->prepend($this->paddleJsSetupCode());
         }
 
+        // @TODO
         // Inject Paddle Payment Update URL into detailed subscriptions widget
         if (false !== strpos($e->getTemplateName(), 'blocks/member-history-detailedsubscriptions')) {
             $v = $e->getView();
@@ -85,6 +86,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             }
         }
 
+        // @TODO
         // Inject Paddle receipt link into payment history widget
         if (false !== strpos($e->getTemplateName(), 'blocks/member-history-paymenttable')) {
             $v = $e->getView();
@@ -140,6 +142,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             $form->addProlog("<div class='warning_box'>You are currently using Sandbox credentials. All transactions are tests, meaning they're simulated and any money isn't real.</div>");
         }
 
+        // @TODO
         $fs = $this->getExtraSettingsFieldSet($form);
         $fs->addAdvCheckbox('cbk_lock')->setLabel('Lock User Account on Chargeback
         If checked, will add a note and lock the user account if a chargeback is received.');
@@ -396,6 +399,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         if ('pay' == $request->getActionName()) {
             $view = $this->getDi()->view;
             $view->title = ___('Paddle Billing Checkout');
+            $view->content = ___('If you have closed the checkout, please refresh the page or go back to the page you came from and try again.');
             $view->display('member/layout.phtml');
 
             return;
@@ -424,8 +428,10 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             ['effective_from' => 'immediately'],
             $log
         );
-        $body = @json_decode($response->getBody(), true);
+
+        // * Check response
         if (200 !== $response->getStatus()) {
+            $body = @json_decode($response->getBody(), true);
             $result->setFailed('An error occurred while processing your cancellation request: '.$body['error']['detail']);
             return;
         }
@@ -487,8 +493,10 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             ],
             $log
         );
-        $body = @json_decode($response->getBody(), true);
+
+        // * Check response
         if (200 !== $response->getStatus()) {
+            $body = @json_decode($response->getBody(), true);
             $result->setFailed('An error occurred while processing your refund request: '.$body['error']['detail']);
 
             return;
@@ -586,7 +594,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             Am_Period::YEAR => 'year',
         ];
 
-        return $map[$period->getUnit()] ?? 'year';
+        return $map[$period->getUnit()] ?? 'day';
     }
 
     protected function getDays($period)
@@ -605,6 +613,11 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
             case Am_Period::YEAR:
                 return $period->getCount() * 365;
+
+            case Am_Period::FIXED:
+            case Am_Period::MAX_SQL_DATE:
+                $date = new DateTime($period->getCount());
+                return $date->diff(new DateTime('now'))->days + 1;
 
             default:
                 return 10; // actual value in this case does not matter
