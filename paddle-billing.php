@@ -360,7 +360,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                     successUrl: "{$thanks_url}",
                     customData: null,
                     settings: {
-                        displayMode: "overlay",
+                        displayMode: "inline",
                         theme: "light",
                         locale: "en",
                         frameTarget: "checkout-container",
@@ -577,13 +577,13 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 return ___('One Time Charge');
 
             case '1':
-                return ___('Billed Once');
+                return ___('Bills ONE Time');
 
             case IProduct::RECURRING_REBILLS:
                 return ___('Rebills Until Cancelled');
 
             default:
-                return ___('Billed %d Times', $rebill_times);
+                return ___('Bills %d Times', $rebill_times);
         }
 
         return ucwords($period->getText());
@@ -595,9 +595,11 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         if (!$period instanceof Am_Period) {
             $period = new Am_Period($period);
         }
+
+        // Fixed periods (eg Lifetime) - set 1 (year)
         if (Am_Period::FIXED == $period->getUnit()) {
             // return $this->getDays($period);
-            return 10;
+            return 1;
         }
 
         return $period->getCount();
@@ -615,6 +617,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             Am_Period::YEAR => 'year',
         ];
 
+        // Fixed periods (eg Lifetime) - set year
         return $map[$period->getUnit()] ?? 'year';
     }
 
