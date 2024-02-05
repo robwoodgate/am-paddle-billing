@@ -924,6 +924,24 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
 {
     protected $_qty = [];
 
+    public function findInvoiceId()
+    {
+        // Try decoding to get CUSTOM_DATA_INV field
+        $cdata = $this->event['data']['custom_data'];
+        $public_id = $cdata[Am_Paysystem_PaddleBilling::CUSTOM_DATA_INV] ?? null;
+        if ($public_id) {
+            return $public_id;
+        }
+
+        // Try getting it by receipt id
+        $invoice = Am_Di::getInstance()->invoiceTable->findByReceiptIdAndPlugin(
+            $this->getReceiptId(),
+            $this->getPlugin()->getId()
+        );
+
+        return $invoice ? $invoice->public_id : null;
+    }
+
     public function generateInvoiceExternalId()
     {
         return $this->event['data']['invoice_number'];
@@ -960,24 +978,6 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
             'zip' => $body['address']['postal_code'] ?? '',
             'tax_id' => $body['business']['tax_identifier'] ?? '',
         ];
-    }
-
-    public function findInvoiceId()
-    {
-        // Try decoding to get CUSTOM_DATA_INV field
-        $cdata = $this->event['data']['custom_data'];
-        $public_id = $cdata[Am_Paysystem_PaddleBilling::CUSTOM_DATA_INV] ?? null;
-        if ($public_id) {
-            return $public_id;
-        }
-
-        // Try getting it by receipt id
-        $invoice = Am_Di::getInstance()->invoiceTable->findByReceiptIdAndPlugin(
-            $this->getReceiptId(),
-            $this->getPlugin()->getId()
-        );
-
-        return $invoice ? $invoice->public_id : null;
     }
 
     public function autoCreateGetProducts()
@@ -1202,46 +1202,46 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                     $this,
                     $this->getReceiptId()
                 );
-                if ($this->getPlugin()->getConfig('cbk_lock')) {
-                    // Create a user note
-                    $note = ___('Payment was disputed and a chargeback was received. User account disabled.');
-                    $user = $this->getPlugin()->addUserNote(
-                        $this->invoice->getUser(),
-                        $note
-                    );
-                    if ($user) {
-                        $user->lock(true);
-                    }
+                // Lock account if option is enabled
+                if (!$this->getPlugin()->getConfig('cbk_lock')) {
+                    return;
+                }
+                $note = ___('Payment was disputed and a chargeback was received. User account disabled.');
+                $user = $this->getPlugin()->addUserNote(
+                    $this->invoice->getUser(),
+                    $note
+                );
+                if ($user) {
+                    $user->lock(true);
                 }
 
                 break;
-//@TODO FROM HERE
-            case 'chargeback_reverse':
+
             case 'chargeback_warning':
-                if ($this->getPlugin()->getConfig('hrt_lock')) {
-                    // Lock account until case is resolved
-                    $lock = true;
-                    $note = ___(
-                        'Paddle flagged a recent payment by this user as high risk (%s chance of fraud). User account disabled.',
-                        (float) $this->request->getPost('risk_score').'%'
-                    );
-                    // Case rejected - lock account
-                    if ('rejected' == $this->request->getPost('status')) {
-                        $lock = true;
-                        $note = ___('Paddle rejected the high risk payment. User account disabled.');
-                    }
-                    // Case resolved ok - unlock account
-                    if ('accepted' == $this->request->getPost('status')) {
-                        $lock = false;
-                        $note = ___('Paddle approved the high risk payment. User account reenabled.');
-                    }
-                    $user = $this->getPlugin()->addUserNote(
-                        $this->request->getPost('customer_email_address'),
-                        $note
-                    );
-                    if ($user) {
-                        $user->lock($lock);
-                    }
+                if (!$this->getPlugin()->getConfig('hrt_lock')) {
+                    return;
+                }
+                // Lock account
+                $note = ___('Paddle received early warning of an upcoming chargeback. User account disabled.');
+                $user = $this->getPlugin()->addUserNote(
+                    $this->invoice->getUser(),
+                    $note
+                );
+                if ($user) {
+                    $user->lock(true);
+                }
+
+                break;
+
+            case 'chargeback_reverse':
+                // Case resolved ok - unlock account
+                $note = ___('Paddle reversed the chargeback. User account unlocked.');
+                $user = $this->getPlugin()->addUserNote(
+                    $this->invoice->getUser(),
+                    $note
+                );
+                if ($user) {
+                    $user->lock(false);
                 }
         }
     }
