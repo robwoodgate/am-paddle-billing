@@ -957,7 +957,10 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
         return true;
     }
 
-    // @TODO
+    /**
+     * Provision access based on webhooks
+     * @see https://developer.paddle.com/build/subscriptions/provision-access-webhooks
+     */
     public function processValidated(): void
     {
         // * Save subscription ID if set
