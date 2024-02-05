@@ -741,15 +741,8 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
 class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_Incoming
 {
-    protected $_autoCreateMap = [
-        'name' => 'customer_name',
-        'email' => 'email',
-        'country' => 'country',
-        'user_external_id' => 'email',
-        'invoice_external_id' => 'order_id',
-    ];
-
     protected $event;
+    protected $_qty = [];
 
     public function __construct(
         Am_Paysystem_Abstract $plugin,
@@ -761,41 +754,91 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
         $this->event = json_decode($request->getRawBody(), true);
     }
 
+    public function getUniqId()
+    {
+        return $this->event['data']['id'] ?? null;
+    }
+
+    public function generateInvoiceExternalId()
+    {
+        return $this->event['data']['invoice_number'] ?? null;
+    }
+
+    public function generateUserExternalId(array $userInfo)
+    {
+        return $this->event['data']['customer_id'] ?? null;
+    }
+
+    public function fetchUserInfo()
+    {
+        // * Prepare log
+        $log = $this->getDi()->invoiceLogRecord;
+        $log->title = 'GET CUSTOMER';
+        $log->user_id = $this->invoice->user_id;
+        $log->invoice_id = $this->invoice->pk();
+
+        $response = $this->getPlugin()->_sendRequest('customers/'.$this->generateUserExternalId([]).'?include=address,business', null, $log, Am_HttpRequest::METHOD_GET);
+
+        // * Decode and check transaction ID
+        $body = @json_decode($response->getBody(), true);
+        if (empty($body['data']['id'])) {
+            throw new Am_Exception_InternalError('Bad response: '.$response->getBody());
+        }
+
+        [$name_f, $name_l] = explode(' ', $body['name']);
+
+        return [
+            'email' => $body['email'],
+            'name_f' => $name_f,
+            'name_l' => $name_l,
+            'country' => $body['address']['country_code'] ?? '',
+            'zip' => $body['address']['postal_code'] ?? '',
+            'tax_id' => $body['business']['tax_identifier'] ?? '',
+        ];
+    }
+
     public function findInvoiceId()
     {
         // Try decoding to get CUST_DATA_INV field
         $cdata = $this->event['data']['custom_data'];
+        $public_id = $cdata[Am_Paysystem_PaddleBilling::CUST_DATA_INV] ?? null;
+        if ($public_id) {
+            return $public_id;
+        }
 
-        return $cdata[Am_Paysystem_PaddleBilling::CUST_DATA_INV] ?? null;
+        // Try getting it by transaction_id
+        return $this->getPlugin()->getDi()->db->selectCell('
+            SELECT invoice_public_id FROM ?_invoice_payment WHERE transaction_id=?
+            ', $this->getUniqId());
     }
 
     public function autoCreateGetProducts()
     {
-        // Could be a subscription plan or product ID
-        $item_name = get_first(
-            $this->event['data']['subscription_id'],
-            $this->event['data']['product_id']
-        );
-        if (empty($item_name)) {
-            return;
+        // Check event has line items
+        if (empty($this->event['data']['details']['line_items'])) {
+            return [];
         }
-        $billing_plan = $this->getPlugin()->getDi()->billingPlanTable->findFirstByData(
-            Am_Paysystem_Paddle::PRICE_ID,
-            $item_name
-        );
-        if ($billing_plan) {
-            return [$billing_plan->getProduct()];
+
+        // Grab the price IDs from the transaction
+        $products = [];
+        foreach ($this->event['data']['details']['line_items'] as $txnitm) {
+            $bp = $this->getPlugin()->getDi()->billingPlanTable->findFirstByData(
+                Am_Paysystem_Paddle::PRICE_ID,
+                $txnitm['price_id']
+            );
+            if ($bp) {
+                $product = $bp->getProduct();
+                $products[] = $product->setBillingPlan($bp);
+                $this->_qty[$product->pk()] = @$txnitm['quantity'] ?: 1;
+            }
         }
+
+        return $products;
     }
 
-    public function getUniqId()
+    public function autoCreateGetProductQuantity(Product $pr)
     {
-        return $this->event['notification_id'];
-    }
-
-    public function getReceiptId()
-    {
-        return $this->event['transaction_id'];
+        return $this->_qty[$pr->pk()];
     }
 
     /**
@@ -827,6 +870,7 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
         return true;
     }
 
+    //@TODO
     public function processValidated(): void
     {
         // * Save subscription ID if set
