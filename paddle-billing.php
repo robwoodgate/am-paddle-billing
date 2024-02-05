@@ -74,14 +74,19 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             $e->getView()->placeholder('body-start')->prepend($this->paddleJsSetupCode());
         }
 
-        // @TODO
         // Inject Paddle Payment Update URL into detailed subscriptions widget
         if (false !== strpos($e->getTemplateName(), 'blocks/member-history-detailedsubscriptions')) {
             $v = $e->getView();
             foreach ($v->activeInvoices as &$invoice) {
                 if ($invoice->paysys_id == $this->getId()) {
-                    if ($_ = $invoice->data()->get(static::CARD_UPDATE_URL)) {
-                        $invoice->_updateCcUrl = $_;
+                    if ($_ = $invoice->data()->get(static::SUBSCRIPTION_ID)) {
+                        $invoice->_updateCcUrl = $this->getDi()->url(
+                            'payment/'.$this->getId().'/update',
+                            [
+                                'id' => $invoice->getSecureId($this->getId()),
+                                'sub' => $_,
+                            ]
+                        );
                     }
                 }
             }
@@ -427,7 +432,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             $log->invoice_id = $invoice->pk();
 
             // * Make request
-            $response = $this->_sendRequest(
+            $resp = $this->_sendRequest(
                 "transactions/{$txn_id}/invoice",
                 null,
                 $log,
@@ -435,19 +440,54 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             );
 
             // * Check response
-            $body = @json_decode($response->getBody(), true);
-            if (200 !== $response->getStatus() || empty($body['data']['url'])) {
+            $body = @json_decode($resp->getBody(), true);
+            if (200 !== $resp->getStatus() || empty($body['data']['url'])) {
                 throw new Am_Exception_InputError('An error occurred while downloading: '.$body['error']['detail']);
             }
 
             // Download PDF
             set_time_limit(0);
             ini_set('memory_limit', AM_HEAVY_MEMORY_LIMIT);
-            header("Content-Type: application/pdf");
+            header('Content-Type: application/pdf');
             $filename = strtok(basename($body['data']['url']), '?');
-            header("Content-Disposition: attachment; filename=$filename");
+            header("Content-Disposition: attachment; filename={$filename}");
             readfile($body['data']['url']);
+
             exit;
+        }
+
+        // Update Payment Details
+        if ('update' == $request->getActionName()) {
+            // Get vars
+            $inv_id = $request->getFiltered('id');
+            $sub_id = $request->getFiltered('sub');
+            $invoice = $this->getDi()->invoiceTable->findBySecureId($inv_id, $this->getId());
+            if (!$invoice) {
+                throw new Am_Exception_InputError('Invalid link');
+            }
+
+            // * Prepare log
+            $log = $this->getDi()->invoiceLogRecord;
+            $log->title = 'CARD UPDATE';
+            $log->user_id = $invoice->user_id;
+            $log->invoice_id = $invoice->pk();
+
+            // * Make request
+            $resp = $this->_sendRequest(
+                "subscriptions/{$sub_id}/update-payment-method-transaction",
+                null,
+                $log,
+                Am_HttpRequest::METHOD_GET
+            );
+
+            // * Check response
+            $body = @json_decode($resp->getBody(), true);
+            if (200 !== $resp->getStatus() || empty($body['data']['checkout']['url'])) {
+                throw new Am_Exception_InputError('An error occurred: '.$body['error']['detail']);
+            }
+
+            // Redirect to checkout URL
+            return $response->redirectLocation($body['data']['checkout']['url']);
         }
 
         // Let parent process it
@@ -460,6 +500,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $subscription_id = $invoice->data()->get(static::SUBSCRIPTION_ID);
         if (!$subscription_id) {
             $result->setFailed('Can not find subscription id');
+            return;
         }
         // * Prepare log
         $log = $this->getDi()->invoiceLogRecord;
