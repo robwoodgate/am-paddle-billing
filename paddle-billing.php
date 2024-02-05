@@ -233,6 +233,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             // Init vars
             $rebill = null;
             $fptext = ': '.$this->getText($item->first_period);
+            $sptext = ': '.$this->getRebillText($item->rebill_times);
 
             // Try get product specific image, fall back to default if needed
             $image_url = $item->tryLoadProduct()->img_cart_path ?? $default_img;
@@ -243,7 +244,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 'quantity' => $item->qty,
                 'price' => [
                     'description' => $terms,
-                    'name' => ___('Subscription').$fptext,
+                    'name' => ___('Subscription').$sptext,
                     'billing_cycle' => [
                         'interval' => $this->getInterval($item->second_period),
                         'frequency' => $this->getFrequency($item->second_period),
@@ -277,24 +278,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 ],
             ];
 
-            // Handle free first period products (free trials)
-            // Use the core transaction item payload as is
-            if (!$item->first_total) {
-                $params['items'][] = $txnitm;
-
-                continue;
-            }
-
-            // Handle simple rebills (same first and second price/period)
-            if ($item->first_total == $item->second_total
-                && $item->first_period == $item->second_period
-            ) {
-                unset($txnitm['price']['trial_period']);
-                $params['items'][] = $txnitm;
-
-                continue;
-            }
-
             // Handle one-time payments (ie: no rebill/trial)
             if (!$item->second_period) {
                 $txnitm['price']['name'] = (($item->first_total)
@@ -310,14 +293,31 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 continue;
             }
 
+            // Handle free first period products (free trials)
+            // Use the core transaction item payload as is
+            if (0 == $item->first_total) {
+                $params['items'][] = $txnitm;
+
+                continue;
+            }
+
+            // Handle simple rebills (same first and second price/period)
+            if ($item->first_total == $item->second_total
+                && $item->first_period == $item->second_period
+            ) {
+                unset($txnitm['price']['trial_period']);
+                $params['items'][] = $txnitm;
+
+                continue;
+            }
+
             // Handle complex rebills (different first and second price/period)
             // Paddle doesn't support subscriptions with different prices/periods
             // so we have to treat the first period as a one-time payment
             // and add the second period as a seperate item starting
             // at the end of the first period using a Paddle Trial.
             $rebill = $txnitm; // Copy core transaction item
-            $txnitm['price']['name'] = ___('First Period').$fptext;
-            $rebill['price']['name'] = ___('Second Period').': '.$this->getText($item->second_period);
+            $txnitm['price']['name'] = ___('First Payment').$fptext;
             $txnitm['price']['unit_price']['amount'] = $this->getAmount(
                 $item->first_total,
                 $item->currency
@@ -433,6 +433,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         if (200 !== $response->getStatus()) {
             $body = @json_decode($response->getBody(), true);
             $result->setFailed('An error occurred while processing your cancellation request: '.$body['error']['detail']);
+
             return;
         }
 
@@ -569,6 +570,25 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         return ucwords($period->getText());
     }
 
+    protected function getRebillText($rebill_times)
+    {
+        switch ($rebill_times) {
+            case '0':
+                return ___('One Time Charge');
+
+            case '1':
+                return ___('Billed Once');
+
+            case IProduct::RECURRING_REBILLS:
+                return ___('Rebills Until Cancelled');
+
+            default:
+                return ___('Billed %d Times', $rebill_times);
+        }
+
+        return ucwords($period->getText());
+    }
+
     protected function getFrequency($period)
     {
         // Convert string if needed
@@ -576,7 +596,8 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             $period = new Am_Period($period);
         }
         if (Am_Period::FIXED == $period->getUnit()) {
-            return $this->getDays($period);
+            // return $this->getDays($period);
+            return 10;
         }
 
         return $period->getCount();
@@ -594,7 +615,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             Am_Period::YEAR => 'year',
         ];
 
-        return $map[$period->getUnit()] ?? 'day';
+        return $map[$period->getUnit()] ?? 'year';
     }
 
     protected function getDays($period)
@@ -617,6 +638,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             case Am_Period::FIXED:
             case Am_Period::MAX_SQL_DATE:
                 $date = new DateTime($period->getCount());
+
                 return $date->diff(new DateTime('now'))->days + 1;
 
             default:
@@ -856,7 +878,7 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
 
             case 'subscription_payment_succeeded':
             case 'transaction.completed':
-                //Save the billed line items in case of refund
+                // Save the billed line items in case of refund
                 // * @see processRefund()
                 $line_items = [];
                 foreach ($this->event['data']['details']['line_items'] as $txnitm) {
