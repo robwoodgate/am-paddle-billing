@@ -18,16 +18,14 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
     public const PLUGIN_REVISION = '@@VERSION@@';
-
-    public const SUBSCRIPTION_ID = 'paddlebilling_subscription_id';
-    public const PMT_RECEIPT_URL = 'paddlebilling_receipt_url';
-    public const CARD_UPDATE_URL = 'paddlebilling_update_url';
-    public const PRICE_ID = 'paddle-billing_price_id';
+    public const CUSTOM_DATA_INV = 'am_invoice';
+    public const PRICE_ID = 'paddle-billing_pri_id';
+    public const CUSTOMER_ID = 'paddle-billing_ctm_id';
+    public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
+    public const TXNITM = 'paddle-billing_txnitm';
     public const LIVE_URL = 'https://api.paddle.com/';
     public const SANDBOX_URL = 'https://sandbox-api.paddle.com/';
     public const PADDLEJS_URL = 'https://cdn.paddle.com/paddle/v2/paddle.js';
-    public const CUST_DATA_INV = 'am_invoice';
-    public const TXNITM = 'paddle-billing_txnitm';
     public const API_VERSION = 1;
 
     protected $defaultTitle = 'Paddle Billing';
@@ -70,7 +68,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // Add PaddleJS to member home/signup forms
         static $init = 0;
         if (!$init++) {
-            $e->getView()->placeholder('head-start')->prepend('<script id="paddle-billing-js" src="'.self::PADDLEJS_URL.'"></script>');
+            $e->getView()->placeholder('head-start')->prepend('<script id="paddle-billing-js" src="'.static::PADDLEJS_URL.'"></script>');
             $e->getView()->placeholder('body-start')->prepend($this->paddleJsSetupCode());
         }
 
@@ -193,7 +191,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $params = [
             'currency_code' => $invoice->currency,
             'custom_data' => [
-                static::CUST_DATA_INV => $invoice->public_id,
+                static::CUSTOM_DATA_INV => $invoice->public_id,
             ],
         ];
 
@@ -220,7 +218,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         }
         foreach ($custom as $k => $v) {
             // Make sure we only add proper KVPs, and avoid overwriting invoice!
-            if (!is_int($k) && static::CUST_DATA_INV != $k) {
+            if (!is_int($k) && static::CUSTOM_DATA_INV != $k) {
                 $params['custom_data'][$k] = $v;
             }
         }
@@ -239,7 +237,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // Add invoice items to Paddle Transaction
         // @var $item InvoiceItem
         foreach ($invoice->getItems() as $item) {
-
             // Init vars
             $rebill = null;
             $fptext = ': '.$this->getText($item->first_period);
@@ -549,7 +546,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // * Get the Paddle Transaction Item(s)
         // * and build the items payload
         $items = [];
-        $txnitms = $invoice->data()->get(self::TXNITM);
+        $txnitms = $invoice->data()->get(static::TXNITM);
         foreach ($txnitms as $txnitm) {
             $items[] = [
                 'type' => $type,
@@ -804,7 +801,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             'Content-Type' => 'application/json',
             'User-Agent' => 'paddlebilling-amember/v'.self::PLUGIN_REVISION,
             'Authorization' => 'Bearer '.$this->getConfig('api_key'),
-            'Paddle-Version' => self::API_VERSION,
+            'Paddle-Version' => static::API_VERSION,
         ]);
 
         // Add params and send
@@ -886,9 +883,9 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
 
     public function findInvoiceId()
     {
-        // Try decoding to get CUST_DATA_INV field
+        // Try decoding to get CUSTOM_DATA_INV field
         $cdata = $this->event['data']['custom_data'];
-        $public_id = $cdata[Am_Paysystem_PaddleBilling::CUST_DATA_INV] ?? null;
+        $public_id = $cdata[Am_Paysystem_PaddleBilling::CUSTOM_DATA_INV] ?? null;
         if ($public_id) {
             return $public_id;
         }
@@ -958,78 +955,72 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
     }
 
     /**
-     * Provision access based on webhooks
+     * Provision access based on webhooks.
+     *
      * @see https://developer.paddle.com/build/subscriptions/provision-access-webhooks
      */
     public function processValidated(): void
     {
-        // * Save subscription ID if set
-        $subscription_id = $this->request->getPost('subscription_id');
-        if (!empty($subscription_id)) {
-            $this->invoice->data()->set(
-                Am_Paysystem_Paddle::SUBSCRIPTION_ID,
-                $subscription_id
-            )->update();
-        }
-
-        // * Save payment details update URL if set
-        // * NB: Set globally as it has changed any time update_url is set ;-)
-        $update_url = $this->request->getPost('update_url');
-        if (!empty($update_url)) {
-            $this->invoice->data()->set(
-                Am_Paysystem_Paddle::CARD_UPDATE_URL,
-                $update_url
-            )->update();
-        }
-
         // * Handle webhook alerts
-        switch ($this->request->getPost('alert_name')) {
-            case 'subscription_created':
-                // nothing to do here as subscription_payment_succeeded
-                // fires for free subscriptions too
+        switch ($this->event['event_type']) {
+            case 'subscription.created':
+                // Save subscription ID
+                $this->invoice->data()->set(
+                    Am_Paysystem_Paddle::SUBSCRIPTION_ID,
+                    $this->event['data']['id']
+                )->update();
+
                 break;
 
-            case 'subscription_updated':
-                if ('active' == $this->request->getPost('status')) {
+            case 'subscription.updated':
+                // Update recurring status
+                if (in_array($this->event['data']['status'], ['active', 'trialing'])) {
                     $this->invoice->setStatus(Invoice::RECURRING_ACTIVE); // self-checks
                 }
-                if ('paused' == $this->request->getPost('status')) {
+                if (in_array($this->event['data']['status'], ['paused', 'past_due'])) {
                     $this->invoice->setStatus(Invoice::RECURRING_FAILED); // self-checks
                 }
 
                 // Update rebill date if this was changed in Paddle subscription
-                // NB: Does not change access periods here, because we don't know
-                // why the date was changed - and all payment/cancellation cases
-                // are handled elsewhere, so leave it to be done manually
-                $paddle_rebill_date = $this->request->getPost('next_bill_date');
-                if ($this->invoice->rebill_date != $paddle_rebill_date) {
-                    $this->invoice->updateQuick('rebill_date', $paddle_rebill_date);
+                $rebill_date = $this->event['data']['next_billed_at'];
+                if ($rebill_date && $this->invoice->rebill_date != sqlDate($rebill_date)) {
+                    $this->invoice->updateQuick('rebill_date', $rebill_date);
+                }
+
+                // Extend access for past due invoices while they are in dunning
+                // If dunning fails, status will change to paused or canceled
+                if ('past_due' == $this->event['data']['status'] && $this->invoice->getAccessExpire() < $this->invoice->rebill_date) {
+                    $this->invoice->extendAccessPeriod($this->invoice->rebill_date);
                 }
 
                 break;
 
-            case 'subscription_cancelled':
+            case 'subscription.cancelled':
                 $this->invoice->setCancelled(true);
 
                 break;
 
-            case 'subscription_payment_succeeded':
             case 'transaction.completed':
                 // Save the billed line items in case of refund
-                // * @see processRefund()
+                // @see processRefund()
                 $line_items = [];
                 foreach ($this->event['data']['details']['line_items'] as $txnitm) {
                     if ($txnitm['totals']['total'] > 0) {
                         $line_items[] = $txnitm['id'];
                     }
                 }
-                $this->invoice->data()->set(self::TXNITM, $line_items)->update();
+                $this->invoice->data()->set(static::TXNITM, $line_items)->update();
 
-                // Update user country if needed
+                // Backfill user details, as customer may have added extra
+                // info via the checkout form (like tax id, country etc)
+                // NB: This doesn't CHANGE existing user data, just adds to it!
                 $user = $this->invoice->getUser();
-                $country = $this->request->getPost('country');
-                if ($user && $country && $user->country != $country) {
-                    $user->updateQuick('country', $country);
+                if ($user) {
+                    try {
+                        $this->fillInUserFields($user);
+                    } catch (Exception $e) {
+                        // Don't sweat it
+                    }
                 }
 
                 // Add payment / access
@@ -1038,26 +1029,14 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
                 ) {
                     $this->invoice->addAccessPeriod($this);
                 } else {
-                    $p = $this->invoice->addPayment($this);
-                    $receipt_url = $this->request->getPost('receipt_url');
-                    if (!empty($receipt_url)) {
-                        $p->data()->set( // Save the receipt url
-                            Am_Paysystem_Paddle::PMT_RECEIPT_URL,
-                            $receipt_url
-                        )->update();
-                    }
-                }
-
-                // We are all done for one-off payments...
-                if ('payment_succeeded' == $this->request->getPost('alert_name')) {
-                    break;
+                    $this->invoice->addPayment($this);
                 }
 
                 // Paddle subscriptions continue indefinitely, so we need to
                 // cancel it once all expected payments have been made
-                $payment_count = $this->request->getPost('instalments');
+                $subscription_id = $this->event['data']['subscription_id'];
                 $expected = $this->invoice->getExpectedPaymentsCount();
-                if ($subscription_id && $payment_count >= $expected) {
+                if ($subscription_id && $this->invoice->getPaymentsCount() >= $expected) {
                     $this->log->add(
                         "All {$expected} payments made for subscription_id: {$subscription_id}"
                     );
@@ -1070,23 +1049,11 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
                 }
 
                 break;
+            // @ TODO --- From here---
+            case 'adjustment.created':
+            case 'adjustment.updated':
+                // NB: Adjustments are updated when Paddle approves or rejects a refund
 
-            case 'subscription_payment_failed':
-                // Handle Paddle Dunning process - next_retry_date will be set
-                // if there are more retries to make. If set, sync rebill date
-                // then extend the access if required to allow for this grace period
-                $next_retry_date = $this->request->getPost('next_retry_date');
-                if ($next_retry_date && $this->invoice->rebill_date != $next_retry_date) {
-                    $this->invoice->updateQuick('rebill_date', $next_retry_date);
-                }
-                if ($this->invoice->getAccessExpire() < $this->invoice->rebill_date) {
-                    $this->invoice->extendAccessPeriod($this->invoice->rebill_date);
-                }
-
-                break;
-
-            case 'subscription_payment_refunded':
-            case 'payment_refunded':
                 // VAT refunds do not affect member access, and aMember invoices
                 // are blind to Paddle's VAT accounting, so just add a user note.
                 if ('vat' == $this->request->getParam('refund_type')) {
