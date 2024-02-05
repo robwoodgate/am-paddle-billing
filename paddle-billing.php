@@ -397,7 +397,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
     public function createTransaction($request, $response, array $invokeArgs)
     {
-        return new Am_Paysystem_PaddleBilling_Transaction($this, $request, $response, $invokeArgs);
+        return Am_Paysystem_Transaction_PaddleBilling_Webhook::create($this, $request, $response, $invokeArgs);
     }
 
     public function directAction($request, $response, $invokeArgs)
@@ -823,10 +823,12 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     }
 }
 
-class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_Incoming
+/**
+ * Factory class for webhook handling.
+ */
+class Am_Paysystem_Transaction_PaddleBilling_Webhook extends Am_Paysystem_Transaction_Incoming
 {
     protected $event;
-    protected $_qty = [];
 
     public function __construct(
         Am_Paysystem_Abstract $plugin,
@@ -838,19 +840,98 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
         $this->event = json_decode($request->getRawBody(), true);
     }
 
+    public static function create(
+        Am_Paysystem_Abstract $plugin,
+        Am_Mvc_Request $request,
+        Am_Mvc_Response $response,
+        $invokeArgs
+    ) {
+        $event = json_decode($request->getRawBody(), true);
+
+        switch ($event['type']) {
+            case 'transaction.completed':
+                return new Am_Paysystem_PaddleBilling_Webhook_Transaction($plugin, $request, $response, $invokeArgs);
+
+                break;
+
+            case 'subscription.created':
+            case 'subscription.updated':
+            case 'subscription.cancelled':
+                return new Am_Paysystem_PaddleBilling_Webhook_Subscription($plugin, $request, $response, $invokeArgs);
+
+                break;
+
+            case 'adjustment.created':
+            case 'adjustment.updated':
+                return new Am_Paysystem_PaddleBilling_Webhook_Adjustment($plugin, $request, $response, $invokeArgs);
+        }
+    }
+
+    public function validateSource()
+    {
+        // Extract timestamp (ts) and hash (h1) from signature
+        $raw_sig = $this->request->getHeader('Paddle-Signature');
+        parse_str(str_replace(';', '&', $raw_sig), $sig);
+
+        // Build payload
+        $payload = $sig['ts'].':'.$this->request->getRawBody();
+
+        return $sig['h1'] === hash_hmac(
+            'sha256',
+            $payload,
+            $this->getPlugin()->getConfig('secret_key')
+        );
+    }
+
+    public function validateTerms()
+    {
+        return true;
+    }
+
+    public function validateStatus()
+    {
+        return true;
+    }
+
+    /**
+     * Function must return an unique identified of transaction, so the same
+     * transaction will not be handled twice. It can be for example:
+     * txn_id form paypal, invoice_id-payment_sequence_id from other paysystem
+     * invoice_id and random is not accceptable here
+     * timestamped date of transaction is acceptable.
+     *
+     * @return string (up to 32 chars)
+     */
     public function getUniqId()
     {
-        return $this->event['data']['id'] ?? null;
+        return $this->event['data']['id'];
     }
+
+    /**
+     * Function must return receipt id of the payment - it is the payment reference#
+     * as returned from payment system. By default it just calls @see getUniqId,
+     * but this can be overriden.
+     *
+     * @return string
+     */
+    public function getReceiptId()
+    {
+        return $this->getUniqId();
+    }
+}
+
+class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transaction_Incoming
+{
+    protected $_qty = [];
 
     public function generateInvoiceExternalId()
     {
-        return $this->event['data']['invoice_number'] ?? null;
+        return $this->event['data']['invoice_number'];
     }
 
     public function generateUserExternalId(array $userInfo)
     {
-        return $this->event['data']['customer_id'] ?? null;
+        return $this->event['data']['customer_id'];
     }
 
     public function fetchUserInfo()
@@ -890,10 +971,13 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
             return $public_id;
         }
 
-        // Try getting it by transaction_id
-        return $this->getPlugin()->getDi()->db->selectCell('
-            SELECT invoice_public_id FROM ?_invoice_payment WHERE transaction_id=?
-            ', $this->getUniqId());
+        // Try getting it by receipt id
+        $invoice = Am_Di::getInstance()->invoiceTable->findByReceiptIdAndPlugin(
+            $this->getReceiptId(),
+            $this->getPlugin()->getId()
+        );
+
+        return $invoice ? $invoice->public_id : null;
     }
 
     public function autoCreateGetProducts()
@@ -926,32 +1010,84 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
     }
 
     /**
-     * @see https://developer.paddle.com/webhooks/signature-verification
+     * Provision access.
+     *
+     * @see https://developer.paddle.com/build/subscriptions/provision-access-webhooks
      */
-    public function validateSource()
+    public function processValidated(): void
     {
-        // Extract timestamp (ts) and hash (h1) from signature
-        $raw_sig = $this->request->getHeader('Paddle-Signature');
-        parse_str(str_replace(';', '&', $raw_sig), $sig);
+        // Save the billed line items in case of refund
+        // @see processRefund()
+        $line_items = [];
+        foreach ($this->event['data']['details']['line_items'] as $txnitm) {
+            if ($txnitm['totals']['total'] > 0) {
+                $line_items[] = $txnitm['id'];
+            }
+        }
+        $this->invoice->data()->set(static::TXNITM, $line_items)->update();
 
-        // Build payload
-        $payload = $sig['ts'].':'.$this->request->getRawBody();
+        // Backfill user details, as customer may have added extra
+        // info via the checkout form (like tax id, country etc)
+        // NB: This doesn't CHANGE existing user data, just adds to it!
+        $user = $this->invoice->getUser();
+        if ($user) {
+            try {
+                $this->fillInUserFields($user);
+            } catch (Exception $e) {
+                // Don't sweat it
+            }
+        }
 
-        return $sig['h1'] === hash_hmac(
-            'sha256',
-            $payload,
-            $this->getPlugin()->getConfig('secret_key')
+        // Add payment / access
+        if (0 == (float) $this->invoice->first_total
+            && Invoice::PENDING == $this->invoice->status
+        ) {
+            $this->invoice->addAccessPeriod($this);
+        } else {
+            $this->invoice->addPayment($this);
+        }
+
+        // Paddle subscriptions continue indefinitely, so we need to
+        // cancel it once all expected payments have been made
+        $subscription_id = $this->event['data']['subscription_id'];
+        $expected = $this->invoice->getExpectedPaymentsCount();
+        if ($subscription_id && $this->invoice->getPaymentsCount() >= $expected) {
+            $this->log->add(
+                "All {$expected} payments made for subscription_id: {$subscription_id}"
+            );
+            $result = new Am_Paysystem_Result();
+            $result->setSuccess();
+            $this->getPlugin()->cancelAction($this->invoice, 'cancel', $result);
+            if ($result->isFailure()) {
+                $this->log->add("Unable to cancel subscription_id: {$subscription_id} - ".$result->getLastError());
+            }
+        }
+    }
+}
+
+class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Transaction_Incoming
+{
+    public function getReceiptId()
+    {
+        return $this->event['data']['transaction_id'];
+    }
+
+    public function findInvoiceId()
+    {
+        // Try decoding to get CUSTOM_DATA_INV field
+        $cdata = $this->event['data']['custom_data'];
+        $public_id = $cdata[Am_Paysystem_PaddleBilling::CUSTOM_DATA_INV] ?? null;
+        if ($public_id) {
+            return $public_id;
+        }
+
+        // Try getting it by receipt id
+        $invoice = Am_Di::getInstance()->invoiceTable->findByReceiptIdAndPlugin(
+            $this->getReceiptId(),
+            $this->getPlugin()->getId()
         );
-    }
 
-    public function validateStatus()
-    {
-        return true;
-    }
-
-    public function validateTerms()
-    {
-        return true;
+        return $invoice ? $invoice->public_id : null;
     }
 
     /**
@@ -997,149 +1133,71 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
 
             case 'subscription.cancelled':
                 $this->invoice->setCancelled(true);
+        }
+    }
+}
 
-                break;
+class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transaction_Incoming
+{
+    public function getReceiptId()
+    {
+        return $this->event['data']['transaction_id'];
+    }
 
-            case 'transaction.completed':
-                // Save the billed line items in case of refund
-                // @see processRefund()
-                $line_items = [];
-                foreach ($this->event['data']['details']['line_items'] as $txnitm) {
-                    if ($txnitm['totals']['total'] > 0) {
-                        $line_items[] = $txnitm['id'];
-                    }
-                }
-                $this->invoice->data()->set(static::TXNITM, $line_items)->update();
+    public function findInvoiceId()
+    {
+        // Try getting it by receipt id
+        $invoice = Am_Di::getInstance()->invoiceTable->findByReceiptIdAndPlugin(
+            $this->getReceiptId(),
+            $this->getPlugin()->getId()
+        );
 
-                // Backfill user details, as customer may have added extra
-                // info via the checkout form (like tax id, country etc)
-                // NB: This doesn't CHANGE existing user data, just adds to it!
-                $user = $this->invoice->getUser();
-                if ($user) {
-                    try {
-                        $this->fillInUserFields($user);
-                    } catch (Exception $e) {
-                        // Don't sweat it
-                    }
-                }
+        return $invoice ? $invoice->public_id : null;
+    }
 
-                // Add payment / access
-                if (0 == (float) $this->invoice->first_total
-                    && Invoice::PENDING == $this->invoice->status
-                ) {
-                    $this->invoice->addAccessPeriod($this);
-                } else {
-                    $this->invoice->addPayment($this);
-                }
-
-                // Paddle subscriptions continue indefinitely, so we need to
-                // cancel it once all expected payments have been made
-                $subscription_id = $this->event['data']['subscription_id'];
-                $expected = $this->invoice->getExpectedPaymentsCount();
-                if ($subscription_id && $this->invoice->getPaymentsCount() >= $expected) {
-                    $this->log->add(
-                        "All {$expected} payments made for subscription_id: {$subscription_id}"
-                    );
-                    $result = new Am_Paysystem_Result();
-                    $result->setSuccess();
-                    $this->getPlugin()->cancelAction($this->invoice, 'cancel', $result);
-                    if ($result->isFailure()) {
-                        $this->log->add("Unable to cancel subscription_id: {$subscription_id} - ".$result->getLastError());
-                    }
-                }
-
-                break;
-            // @ TODO --- From here---
-            case 'adjustment.created':
-            case 'adjustment.updated':
-                // NB: Adjustments are updated when Paddle approves or rejects a refund
-
-                // VAT refunds do not affect member access, and aMember invoices
-                // are blind to Paddle's VAT accounting, so just add a user note.
-                if ('vat' == $this->request->getParam('refund_type')) {
-                    $note = ___(
-                        'Paddle issued a VAT refund of %1$s for invoice #%2$s.',
-                        Am_Currency::render(
-                            $this->request->getParam('balance_gross_refund'),
-                            $this->request->getParam('balance_currency')
-                        ),
-                        $this->invoice->invoice_id.'/'.$this->invoice->public_id
-                    );
-                    $this->getPlugin()->addUserNote($this->request->getPost('email'), $note);
-
-                    return; // nothing more to do
-                }
-
-                // NB: Paddle currency localisation means refunds may be given
-                // in a different currency to the aMember invoice. Paddle reports
-                // refund amount in both local currency and balance currency
-                // We do this to record partial refunds made on Paddle's side
-                $local_currency = $this->request->getParam('currency');
-                $balance_currency = $this->request->getParam('balance_currency');
-                $amount = null;
-                if ($this->invoice->currency == $local_currency) {
-                    // Invoice currency matches Local currency
-                    $amount = $this->request->getParam('gross_refund');
-                } elseif ($this->invoice->currency == $balance_currency) {
-                    // Invoice currency matches Balance currency
-                    $amount = $this->request->getParam('balance_gross_refund');
-                } elseif (Am_Currency::getDefault() == $local_currency) {
-                    // aMember currency matches Local currency
-                    // NB: We multiply to convert FROM base TO invoice currency
-                    $amount = $this->request->getParam('gross_refund');
-                    $amount = $amount * $this->invoice->base_currency_multi;
-                } elseif (Am_Currency::getDefault() == $balance_currency) {
-                    // aMember currency matches Balance currency
-                    // NB: We multiply to convert FROM base TO invoice currency
-                    $amount = $this->request->getParam('balance_gross_refund');
-                    $amount = $amount * $this->invoice->base_currency_multi;
-                }
-
-                // Calculate the remaining balance for a full refund
-                // This will ensure access is revoked and balance is zero
-                if ('full' == $this->request->getParam('refund_type')) {
-                    $amount = 0;
-                    foreach ($this->getPlugin()->getDi()->invoicePaymentTable->findBy(
-                        ['receipt_id' => $this->getReceiptId(),
-                            'invoice_id' => $this->invoice->invoice_id]
-                    ) as $p) {
-                        $amount += $p->amount;
-                    }
-                    foreach ($this->getPlugin()->getDi()->invoiceRefundTable->findBy(
-                        ['receipt_id' => $this->getReceiptId(),
-                            'invoice_id' => $this->invoice->invoice_id]
-                    ) as $p) {
-                        $amount -= $p->amount;
-                    }
-                }
-
-                // Could not get the refund amount in the invoice currency or
-                // aMember currency, so just add refund as a user note.
-                if (!$amount) {
-                    $note = ___(
-                        '%1$s refund of %2$s issued via Paddle for invoice #%3$s.',
-                        ucfirst($this->request->getParam('refund_type')),
-                        Am_Currency::render(
-                            $this->request->getParam('balance_gross_refund'),
-                            $this->request->getParam('balance_currency')
-                        ),
-                        $this->invoice->invoice_id.'/'.$this->invoice->public_id
-                    );
-                    $this->getPlugin()->addUserNote($this->request->getPost('email'), $note);
-
-                    return; // nothing more to do
-                }
-
-                // Process the refund
-                $this->invoice->addRefund(
-                    $this,
-                    $this->getReceiptId(),
-                    $amount
+    /**
+     * Provision access based on webhooks.
+     *
+     * @see https://developer.paddle.com/build/subscriptions/provision-access-webhooks
+     */
+    public function processValidated(): void
+    {
+        // * Handle webhook alerts
+        switch ($this->event['data']['action']) {
+            case 'credit_reverse':
+            case 'credit':
+                $note = ___(
+                    'Paddle %1$s a credit of %2$s for invoice #%3$s.',
+                    'credit' == $this->event['data']['action'] ? 'issued' : 'reversed',
+                    Am_Currency::render(
+                        $this->event['data']['totals']['total'],
+                        $this->event['data']['totals']['currency_code']
+                    ),
+                    $this->invoice->invoice_id.'/'.$this->invoice->public_id
                 );
+                $this->getPlugin()->addUserNote($this->invoice->getUser(), $note);
 
                 break;
 
-            case 'payment_dispute_created':
+            case 'refund':
+                // NB: Adjustments are updated when Paddle approves or rejects a refund
+                if ('approved' != $this->event['data']['status']) {
+                    return;
+                }
+
+                try {
+                    $this->invoice->addRefund(
+                        $this,
+                        $this->getReceiptId(),
+                        $this->event['data']['totals']['total'] / pow(10, Am_Currency::$currencyList[$this->invoice->currency]['precision'])
+                    );
+                } catch (Am_Exception_Db_NotUnique $e) {
+                    // Refund already added
+                }
+
+                break;
+
+            case 'chargeback':
                 $this->invoice->addChargeback(
                     $this,
                     $this->getReceiptId()
@@ -1148,7 +1206,7 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
                     // Create a user note
                     $note = ___('Payment was disputed and a chargeback was received. User account disabled.');
                     $user = $this->getPlugin()->addUserNote(
-                        $this->request->getPost('email'),
+                        $this->invoice->getUser(),
                         $note
                     );
                     if ($user) {
@@ -1157,9 +1215,9 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
                 }
 
                 break;
-
-            case 'high_risk_transaction_created':
-            case 'high_risk_transaction_updated':
+//@TODO FROM HERE
+            case 'chargeback_reverse':
+            case 'chargeback_warning':
                 if ($this->getPlugin()->getConfig('hrt_lock')) {
                     // Lock account until case is resolved
                     $lock = true;
@@ -1185,8 +1243,6 @@ class Am_Paysystem_PaddleBilling_Transaction extends Am_Paysystem_Transaction_In
                         $user->lock($lock);
                     }
                 }
-
-                break;
         }
     }
 }
