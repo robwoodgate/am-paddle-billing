@@ -67,8 +67,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // Add PaddleJS to member home/signup forms
         static $init = 0;
         if (!$init++) {
-            $e->getView()->placeholder('head-start')->prepend('<script id="paddle-billing-js" src="'.static::PADDLEJS_URL.'"></script>');
-            $e->getView()->placeholder('body-start')->prepend($this->paddleJsSetupCode());
+            $e->getView()->placeholder('head-start')->prepend('<script id="paddle-billing-js" src="'.static::PADDLEJS_URL.'"></script>'.$this->paddleJsSetupCode());
         }
 
         // Inject Paddle Payment Update URL into detailed subscriptions widget
