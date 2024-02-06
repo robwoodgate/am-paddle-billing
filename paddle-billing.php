@@ -840,12 +840,13 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     }
 
     /**
-     * Private convenience method to send authenticated Paddle API requests.
+     * Convenience method to send authenticated Paddle API requests.
+     * NB: Public so Am_Paysystem_PaddleBilling_Webhook_Transaction can call it
      *
      * @param mixed $url
      * @param mixed $method
      */
-    private function _sendRequest(
+    public function _sendRequest(
         $url,
         ?array $params = null,
         ?InvoiceLog $log = null,
