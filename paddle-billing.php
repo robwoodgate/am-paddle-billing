@@ -3,9 +3,10 @@
  * Paddle Billing
  * Contributed by R Woodgate, Cogmentis Ltd.
  *
- * New account setup:
- * 1) Set Default Payment Link: Paddle > Checkout > Checkout Settings.
+ * @desc Paddle Billing is the evolution of Paddle Classic, and is the default billing API for Paddle accounts created after August 8th, 2023.
  *
+ */
+ /**
  * ============================================================================
  * Revision History:
  * ----------------
