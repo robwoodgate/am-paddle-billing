@@ -1084,7 +1084,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
                 $line_items[] = $txnitm['id'];
             }
         }
-        $this->invoice->data()->set(static::TXNITM, $line_items)->update();
+        $this->invoice->data()->set(Am_Paysystem_PaddleBilling::TXNITM, $line_items)->update();
 
         // Backfill user details, as customer may have added extra
         // info via the checkout form (like tax id, country etc)
