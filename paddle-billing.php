@@ -153,10 +153,12 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
         // @TODO
         $fs = $this->getExtraSettingsFieldSet($form);
+        $fs->addAdvCheckbox('cbw_lock')->setLabel('Lock User Account on Chargeback Warning
+        If checked, will add a note and lock the user account if Paddle gets a warning of an upcoming chargeback.');
         $fs->addAdvCheckbox('cbk_lock')->setLabel('Lock User Account on Chargeback
         If checked, will add a note and lock the user account if a chargeback is received.');
-        $fs->addAdvCheckbox('hrt_lock')->setLabel('Lock User Account on Fraud Warning
-        You need to configure Paddle to send "High Risk Transaction Created" and "High Risk Transaction Updated" webhook alerts. If checked, will add a note and lock the user account until the flagged transaction is approved.');
+        $fs->addAdvCheckbox('cbr_unlock')->setLabel('Unlock User Account on Chargeback Reversal
+        If checked, will add a note and unlock the user account if a chargeback is reversed.');
         $fs->addAdvCheckbox('show_grid')->setLabel(___("Show Plans in Product Grid\nIf checked, the plugin will add a column to the Manage Products grid"));
         $fs->addText('image_url', [
             'class' => 'el-wide',
@@ -226,7 +228,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // Get default image if available and correctly formatted
         // Choose the cart default (if set) over plugin default
         if ($default_img = $this->getDi()->config->get('cart.img_cart_default_path')) {
-            $default_img = $this->url('data/public/'.$default_img);
+            $default_img = $this->getDi()->url('data/public/'.$default_img, null, false, true);
         } else {
             $default_img = $this->getConfig('image_url');
         }
@@ -920,7 +922,7 @@ class Am_Paysystem_Transaction_PaddleBilling_Webhook extends Am_Paysystem_Transa
     }
 }
 
-class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transaction_Incoming
+class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transaction_PaddleBilling_Webhook
 {
     protected $_qty = [];
 
@@ -974,9 +976,9 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
             'email' => $body['email'],
             'name_f' => $name_f,
             'name_l' => $name_l,
-            'country' => $body['address']['country_code'] ?? '',
-            'zip' => $body['address']['postal_code'] ?? '',
-            'tax_id' => $body['business']['tax_identifier'] ?? '',
+            'country' => $body['address']['country_code'],
+            'zip' => $body['address']['postal_code'],
+            'tax_id' => $body['business']['tax_identifier'],
         ];
     }
 
@@ -1065,7 +1067,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
     }
 }
 
-class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Transaction_Incoming
+class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Transaction_PaddleBilling_Webhook
 {
     public function getReceiptId()
     {
@@ -1120,7 +1122,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
                 // Update rebill date if this was changed in Paddle subscription
                 $rebill_date = $this->event['data']['next_billed_at'];
                 if ($rebill_date && $this->invoice->rebill_date != sqlDate($rebill_date)) {
-                    $this->invoice->updateQuick('rebill_date', $rebill_date);
+                    $this->invoice->updateQuick('rebill_date', sqlDate($rebill_date));
                 }
 
                 // Extend access for past due invoices while they are in dunning
@@ -1137,7 +1139,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
     }
 }
 
-class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transaction_Incoming
+class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transaction_PaddleBilling_Webhook
 {
     public function getReceiptId()
     {
@@ -1168,7 +1170,8 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
             case 'credit':
                 $note = ___(
                     'Paddle %1$s a credit of %2$s for invoice #%3$s.',
-                    'credit' == $this->event['data']['action'] ? 'issued' : 'reversed',
+                    'credit' == $this->event['data']['action']
+                        ? ___('issued') : ___('reversed'),
                     Am_Currency::render(
                         $this->event['data']['totals']['total'],
                         $this->event['data']['totals']['currency_code']
@@ -1180,7 +1183,8 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                 break;
 
             case 'refund':
-                // NB: Adjustments are updated when Paddle approves or rejects a refund
+                // NB: Refund adjustments are created with pending status,
+                // and updated when Paddle approves or rejects the refund
                 if ('approved' != $this->event['data']['status']) {
                     return;
                 }
@@ -1189,7 +1193,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                     $this->invoice->addRefund(
                         $this,
                         $this->getReceiptId(),
-                        $this->event['data']['totals']['total'] / pow(10, Am_Currency::$currencyList[$this->invoice->currency]['precision'])
+                        $this->event['data']['totals']['total']
                     );
                 } catch (Am_Exception_Db_NotUnique $e) {
                     // Refund already added
@@ -1202,7 +1206,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                     $this,
                     $this->getReceiptId()
                 );
-                // Lock account if option is enabled
+                // Check Lock account option is enabled
                 if (!$this->getPlugin()->getConfig('cbk_lock')) {
                     return;
                 }
@@ -1218,10 +1222,10 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                 break;
 
             case 'chargeback_warning':
-                if (!$this->getPlugin()->getConfig('hrt_lock')) {
+                // Check Lock account option is enabled
+                if (!$this->getPlugin()->getConfig('cbw_lock')) {
                     return;
                 }
-                // Lock account
                 $note = ___('Paddle received early warning of an upcoming chargeback. User account disabled.');
                 $user = $this->getPlugin()->addUserNote(
                     $this->invoice->getUser(),
