@@ -160,9 +160,9 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $fs->addAdvCheckbox('show_grid')->setLabel(___("Show Plans in Product Grid\nIf checked, the plugin will add a column to the Manage Products grid"));
         $fs->addText('image_url', [
             'class' => 'am-el-wide',
-            'placeholder' => $this->getDi()->url('path/to/my_logo.png', null, false, true)
+            'placeholder' => $this->getDi()->url('path/to/my_logo.png', null, false, true),
         ])->setLabel("Default Image URL\nAn absolute URL to a square image of your brand or product. Recommended minimum size is 128x128px. Supported image types are: .gif, .jpeg, and .png. Will be used for single payments where the optional Paddle Product ID is not supplied.");
-        $fs->addText('statement_desc')->setLabel("Statement Description\nThe Statement Description from your Paddle Dashboard > Checkout > Checkout Settings page. Shown on the thanks page to help alert customer as to what will appear on their card statement.");
+        $fs->addText('statement_desc')->setLabel("Statement Description\nThe Statement Description from your Paddle Dashboard > Checkout > <a href='https://vendors.paddle.com/checkout-settings'>Checkout Settings</a> page. Shown on the thanks page to help alert customer as to what will appear on their card statement.");
     }
 
     public function isConfigured()
@@ -402,12 +402,13 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
     public function directAction($request, $response, $invokeArgs)
     {
-        // Default payment page
+        // Default payment link page
+        // @see: https://developer.paddle.com/build/transactions/default-payment-link
         if ('pay' == $request->getActionName()) {
+            $ptxn = $request->getParam('_ptxn');
             $view = $this->getDi()->view;
-            $view->title = ___('Paddle Billing Checkout');
-            $view->content = ___('If you have closed the checkout, please refresh the page or go back to the page you came from and try again.');
-            $view->display('member/layout.phtml');
+            $view->content = $this->paddleJsSetupCode();
+            $view->display('layout-blank.phtml');
 
             return;
         }
@@ -637,6 +638,65 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         }
 
         return null;
+    }
+
+    public function getReadme()
+    {
+        $version = self::PLUGIN_REVISION;
+        $whk_url = $this->getPluginUrl('ipn');
+        $mem_url = $this->getDi()->url('member', null, false, true);
+        $dsu_url = $this->getDi()->url('signup', null, false, true);
+        $pay_url = $this->getPluginUrl('pay');
+
+        return <<<README
+            <strong>Paddle Billing Plugin v{$version}</strong>
+            Paddle Billing is the evolution of Paddle Classic, and is the default billing API for Paddle accounts created after August 8th, 2023.
+
+            If you signed up for Paddle before this date, <a href="https://developer.paddle.com/changelog/2023/enable-paddle-billing">you need to opt-in</a> to Paddle Billing. After you opt in, you can toggle between Paddle Billing and Paddle Classic.
+
+            <strong>Instructions</strong>
+
+            1. Upload this plugin's folder and files to the <strong>amember/application/default/plugins/payment/</strong> folder of your aMember installatiion.
+
+            2. Enable the plugin at <strong>aMember Admin -&gt; Setup/Configuration -&gt; Plugins</strong>
+
+            3. Configure the plugin at <strong>aMember Admin -&gt; Setup/Configuration -&gt; Paddle Billing</strong>
+
+            4. In the Developer > <a href="https://vendors.paddle.com/notifications">Notifications</a> menu of your Paddle account, set the following webhook endpoint to listen for these webhook events:
+
+            <strong><code>transaction.completed</code>, <code>adjustment.created</code>, <code>adjustment.updated</code>
+            <code>subscription.created</code>, <code>subscription.updated</code>, <code>subscription.cancelled</code></strong>
+
+            Webhook Endpoint: <input type="text" value="{$whk_url}" size="50" onclick="this.select();"></input>
+
+            You will then need to copy Paddle's secret key for this webhook back to your plugin settings to complete configuration.
+
+            5. In the Checkout > <a href='https://vendors.paddle.com/checkout-settings'>Checkout Settings</a> menu of your Paddle account, set the Default Payment Link to one of the following as suits your needs:
+
+            Member Home: <input type="text" value="{$mem_url}" size="50" onclick="this.select();"></input>
+            NOTE: Requires users to login to aMember first
+
+            Default Signup Form: <input type="text" value="{$dsu_url}" size="50" onclick="this.select();"></input>
+            NOTE: Does not work if default signup redirects to cart
+
+            Default Checkout: <input type="text" value="{$pay_url}" size="50" onclick="this.select();"></input>
+            NOTE: Always available
+
+            This link is used to pop up an overlay checkout when customers update their payment details, and for payment links generated from within Paddle.
+
+            -------------------------------------------------------------------------------
+
+            Copyright 2024 (c) Rob Woodgate, Cogmentis Ltd. All Rights Reserved
+
+            This file may not be distributed unless permission is given by author.
+
+            This file is provided AS IS with NO WARRANTY OF ANY KIND, INCLUDING
+            WARRANTY OF DESIGN, MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+
+            For support (to report bugs and request new features) visit: <a href="https://www.cogmentis.com/">www.cogmentis.com</a>
+            <img src="https://www.cogmentis.com/lcimg/paddle-billing.jpg" />
+            -------------------------------------------------------------------------------
+            README;
     }
 
     protected function getAmount($amount, $currency = 'USD'): string
