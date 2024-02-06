@@ -20,7 +20,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     public const PLUGIN_REVISION = '@@VERSION@@';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
-    public const CUSTOMER_ID = 'paddle-billing_ctm_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
     public const TXNITM = 'paddle-billing_txnitm';
     public const LIVE_URL = 'https://api.paddle.com/';
@@ -31,7 +30,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     protected $defaultTitle = 'Paddle Billing';
     protected $defaultDescription = 'Payment via Paddle Billing gateway';
     protected $_canAutoCreate = true;
-    protected $_canResendPostback = true;
 
     public function init(): void
     {
@@ -39,9 +37,9 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             new Am_CustomFieldText(
                 static::PRICE_ID,
                 'Paddle Billing: Price ID',
-                'Optional. Lets you link and use Paddle Catalog items you have created. Only required if you accept direct payments.',
+                'Optional. Lets you link and use Paddle Catalog items you have created. Only required if you <a href="'.$this->getDi()->url('admin-setup/paddle-billing#auto_create-0').'">accept direct payments</a>.',
                 null,
-                ['placeholder' => 'pri_abc123']
+                ['placeholder' => 'pri_abc123', 'size' => 32]
             )
         );
         $this->getDi()->blocks->add(
@@ -151,7 +149,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             $form->addProlog("<div class='warning_box'>You are currently using Sandbox credentials. All transactions are tests, meaning they're simulated and any money isn't real.</div>");
         }
 
-        // @TODO
+        // Add Extra fields
         $fs = $this->getExtraSettingsFieldSet($form);
         $fs->addAdvCheckbox('cbw_lock')->setLabel('Lock User Account on Chargeback Warning
         If checked, will add a note and lock the user account if Paddle gets a warning of an upcoming chargeback.');
@@ -161,8 +159,8 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         If checked, will add a note and unlock the user account if a chargeback is reversed.');
         $fs->addAdvCheckbox('show_grid')->setLabel(___("Show Plans in Product Grid\nIf checked, the plugin will add a column to the Manage Products grid"));
         $fs->addText('image_url', [
-            'class' => 'el-wide',
-            'placeholder' => 'https://www.example.com/path/to/my_logo.png',
+            'class' => 'am-el-wide',
+            'placeholder' => $this->getDi()->url('path/to/my_logo.png', null, false, true)
         ])->setLabel("Default Image URL\nAn absolute URL to a square image of your brand or product. Recommended minimum size is 128x128px. Supported image types are: .gif, .jpeg, and .png. Will be used for single payments where the optional Paddle Product ID is not supplied.");
         $fs->addText('statement_desc')->setLabel("Statement Description\nThe Statement Description from your Paddle Dashboard > Checkout > Checkout Settings page. Shown on the thanks page to help alert customer as to what will appear on their card statement.");
     }
