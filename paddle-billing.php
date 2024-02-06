@@ -908,7 +908,7 @@ class Am_Paysystem_Transaction_PaddleBilling_Webhook extends Am_Paysystem_Transa
     ) {
         $event = json_decode($request->getRawBody(), true);
 
-        switch ($event['type']) {
+        switch ($event['event_type']) {
             case 'transaction.completed':
                 return new Am_Paysystem_PaddleBilling_Webhook_Transaction($plugin, $request, $response, $invokeArgs);
 
