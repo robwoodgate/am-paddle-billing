@@ -1015,7 +1015,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
     public function fetchUserInfo()
     {
         // * Prepare log
-        $log = $this->getDi()->invoiceLogRecord;
+        $log = Am_Di::getInstance()->invoiceLogRecord;
         $log->title = 'GET CUSTOMER';
         $log->user_id = $this->invoice->user_id;
         $log->invoice_id = $this->invoice->pk();
