@@ -752,7 +752,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         return $resp;
     }
 
-    protected function updatePaddleCustomer(Am_Event $e): void
+    public function updatePaddleCustomer(Am_Event $e): void
     {
         // Vars
         $user = $e->getUser();
