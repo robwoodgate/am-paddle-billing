@@ -1021,7 +1021,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
         $log->user_id = $this->invoice->user_id;
         $log->invoice_id = $this->invoice->pk();
 
-        $response = $this->getPlugin()->_sendRequest('customers/'.$this->generateUserExternalId([]).'?include=address,business', null, $log, Am_HttpRequest::METHOD_GET);
+        $response = $this->getPlugin()->_sendRequest('customers/'.$this->generateUserExternalId([]).'?include=addresses,businesses', null, $log, Am_HttpRequest::METHOD_GET);
 
         // * Decode and check transaction ID
         $body = @json_decode($response->getBody(), true);
