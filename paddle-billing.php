@@ -17,7 +17,7 @@
 class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
-    public const PLUGIN_REVISION = '@@VERSION@@';
+    public const PLUGIN_REVISION = '1.0';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
@@ -49,13 +49,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             'thanks/success',
             new Am_Block_Base('Paddle Statement', 'paddle-statement', $this, [$this, 'renderStatement'])
         );
-
-        // Create/update customer in Paddle when a user updates their details
-        Am_Di::getInstance()->hook->add([
-            Am_Event::SIGNUP_USER_ADDED,
-            Am_Event::SIGNUP_USER_UPDATED,
-            Am_Event::PROFILE_USER_UPDATED,
-        ], [$this, 'updatePaddleCustomer']);
     }
 
     public function renderStatement(Am_View $v)
@@ -190,13 +183,10 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // Create Transaction API. This means we do not have to create/sync
         // products in Paddle. @see: https://developer.paddle.com/build/transactions/bill-create-custom-items-prices-products
 
-        // * Prepare log
-        $log = $this->getDi()->invoiceLogRecord;
-        $log->title = 'DRAFT TRANSACTION';
-        $log->user_id = $invoice->user_id;
-        $log->invoice_id = $invoice->pk();
+        // Create/Update the Paddle customer/address entities
+        $this->updatePaddleCustomer($invoice);
 
-        // * Prepare transaction params
+        // Prepare transaction params
         $params = [
             'currency_code' => $invoice->currency,
             'custom_data' => [
@@ -344,37 +334,41 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             $params['items'][] = $rebill;
         }
 
-        // * Generate the draft transaction
-        $resp = $this->_sendRequest('transactions', $params, $log);
+        // Generate the draft transaction
+        $this->invoice = $invoice; // For log
+        $resp = $this->_sendRequest('transactions', $params, 'DRAFT TRANSACTION');
 
-        // * Decode and check transaction ID
+        // Decode and check transaction ID
         $body = @json_decode($resp->getBody(), true);
         if (empty($body['data']['id'])) {
             throw new Am_Exception_InternalError('Bad response: '.$resp->getBody());
         }
 
-        // * Open pay page
+        // Open pay page
         $a = new Am_Paysystem_Action_HtmlTemplate('pay.phtml');
         $a->invoice = $invoice;
         $environment = $this->isSandbox() ? 'Paddle.Environment.set("sandbox");' : '';
-        $client_token = $this->getConfig('client_token');
-        $retain_key = $this->getConfig('retain_key')
-            ? '"'.$this->getConfig('retain_key').'"' : 'null';
         $txnid = $body['data']['id'];
         $thanks_url = $this->getReturnUrl();
-        $name = $invoice->getName();
-        $email = $invoice->getEmail();
-        $country = $invoice->getCountry();
-        $postcode = $invoice->getZip();
-        $tax_id = $invoice->getUser()->tax_id ?? '';
+        $user = $invoice->getUser();
+        $add = $user->data()->get(static::ADDRESS_ID);
+        $biz = $user->data()->get(static::BUSINESS_ID);
+        $ctm = $user->data()->get(static::CUSTOMER_ID);
+        $customer = '';
+        if ($ctm) {
+            $customer['customer'] = [
+                'id' => $ctm,
+                'address' => ['id' => $add],
+                'business' => ['id' => $biz],
+            ];
+            $customer = json_encode($customer);
+        }
         $a->form = <<<CUT
             <div class="checkout-container"></div>
             <script>
                 {$environment}
                 Paddle.Checkout.open({
                     transactionId: "{$txnid}",
-                    successUrl: "{$thanks_url}",
-                    customData: null,
                     settings: {
                         displayMode: "inline",
                         theme: "light",
@@ -387,16 +381,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                         showAddDiscounts: false,
                         successUrl: "{$thanks_url}",
                     },
-                    customer: {
-                        email: "{$email}", // req
-                        address: {
-                          countryCode: "{$country}",   // req
-                          postalCode: "{$postcode}", // req
-                        },
-                        business: {
-                          taxIdentifier: "{$tax_id}"
-                        }
-                    }
+                    {$customer}
                 });
             </script>
             CUT;
@@ -427,26 +412,20 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             // Get vars
             $inv_id = $request->getFiltered('id');
             $txn_id = $request->getFiltered('txn');
-            $invoice = $this->getDi()->invoiceTable->findBySecureId($inv_id, $this->getId());
-            if (!$invoice) {
+            $this->invoice = $this->getDi()->invoiceTable->findBySecureId($inv_id, $this->getId());
+            if (!$this->invoice) {
                 throw new Am_Exception_InputError('Invalid link');
             }
 
-            // * Prepare log
-            $log = $this->getDi()->invoiceLogRecord;
-            $log->title = 'PDF INVOICE';
-            $log->user_id = $invoice->user_id;
-            $log->invoice_id = $invoice->pk();
-
-            // * Make request
+            // Make request
             $resp = $this->_sendRequest(
                 "transactions/{$txn_id}/invoice",
                 null,
-                $log,
+                'PDF INVOICE',
                 Am_HttpRequest::METHOD_GET
             );
 
-            // * Check response
+            // Check response
             $body = @json_decode($resp->getBody(), true);
             if (200 !== $resp->getStatus() || empty($body['data']['url'])) {
                 throw new Am_Exception_InputError('An error occurred while downloading: '.$body['error']['detail']);
@@ -468,26 +447,20 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             // Get vars
             $inv_id = $request->getFiltered('id');
             $sub_id = $request->getFiltered('sub');
-            $invoice = $this->getDi()->invoiceTable->findBySecureId($inv_id, $this->getId());
-            if (!$invoice) {
+            $this->invoice = $this->getDi()->invoiceTable->findBySecureId($inv_id, $this->getId());
+            if (!$this->invoice) {
                 throw new Am_Exception_InputError('Invalid link');
             }
 
-            // * Prepare log
-            $log = $this->getDi()->invoiceLogRecord;
-            $log->title = 'CARD UPDATE';
-            $log->user_id = $invoice->user_id;
-            $log->invoice_id = $invoice->pk();
-
-            // * Make request
+            // Make request
             $resp = $this->_sendRequest(
                 "subscriptions/{$sub_id}/update-payment-method-transaction",
                 null,
-                $log,
+                'CARD UPDATE',
                 Am_HttpRequest::METHOD_GET
             );
 
-            // * Check response
+            // Check response
             $body = @json_decode($resp->getBody(), true);
             if (200 !== $resp->getStatus() || empty($body['data']['checkout']['url'])) {
                 throw new Am_Exception_InputError('An error occurred: '.$body['error']['detail']);
@@ -510,20 +483,16 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
             return;
         }
-        // * Prepare log
-        $log = $this->getDi()->invoiceLogRecord;
-        $log->title = 'CANCEL';
-        $log->user_id = $invoice->user_id;
-        $log->invoice_id = $invoice->pk();
 
-        // * Make request
+        // Make request
+        $this->invoice = $invoice; // For log
         $resp = $this->_sendRequest(
             "subscriptions/{$subscription_id}/cancel",
             ['effective_from' => 'immediately'],
-            $log
+            'CANCEL'
         );
 
-        // * Check response
+        // Check response
         if (200 !== $resp->getStatus()) {
             $body = @json_decode($resp->getBody(), true);
             $result->setFailed('An error occurred while processing your cancellation request: '.$body['error']['detail']);
@@ -540,23 +509,19 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // Paddle refunds are not instantaneous - they get requested via API
         // and approved by Paddle staff, at which point a webhook alert is issued
 
-        // * Prepare log
-        $log = $this->getDi()->invoiceLogRecord;
-        $invoice = $payment->getInvoice();
-        $log->title = 'REFUND';
-        $log->user_id = $invoice->user_id;
-        $log->invoice_id = $invoice->pk();
+        // Get invoice
+        $this->invoice = $payment->getInvoice();
 
-        // * Get refund type
+        // Get refund type
         $type = 'partial';
         if (doubleval($amount) == doubleval($payment->amount)) {
             $type = 'full';
         }
 
-        // * Get the Paddle Transaction Item(s)
-        // * and build the items payload
+        // Get the Paddle Transaction Item(s)
+        // and build the items payload
         $items = [];
-        $txnitms = $invoice->data()->get(static::TXNITM);
+        $txnitms = $this->invoice->data()->get(static::TXNITM);
         foreach ($txnitms as $txnitm) {
             $items[] = [
                 'type' => $type,
@@ -564,11 +529,11 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             ];
         }
 
-        // * Multi-item partial refunds must be handled via Paddle
-        // * because we can't allocate the refund amount to items here
-        // * Otherwise, add the amount for a partial refund
+        // Multi-item partial refunds must be handled via Paddle
+        // because we can't allocate the refund amount to items here
+        // Otherwise, add the amount for a partial refund
         if ('partial' == $type) {
-            $items[0]['amount'] = $this->getAmount($amount, $invoice->currency);
+            $items[0]['amount'] = $this->getAmount($amount, $this->invoice->currency);
 
             if (count($items) > 1) {
                 $result->setFailed('Partial refunds for multi-product invoices must be requested from your Paddle account');
@@ -577,7 +542,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             }
         }
 
-        // * Make request
+        // Make request
         $resp = $this->_sendRequest(
             'adjustments',
             [
@@ -586,10 +551,10 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 'transaction_id' => $payment->receipt_id,
                 'reason' => 'Refund requested by user ('.$payment->getUser()->login.')',
             ],
-            $log
+            'REFUND'
         );
 
-        // * Check response
+        // Check response
         if (200 !== $resp->getStatus()) {
             $body = @json_decode($resp->getBody(), true);
             $result->setFailed('An error occurred while processing your refund request: '.$body['error']['detail']);
@@ -718,7 +683,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     public function _sendRequest(
         $url,
         ?array $params = null,
-        ?InvoiceLog $log = null,
+        ?string $logTitle = null,
         $method = Am_HttpRequest::METHOD_POST
     ): HTTP_Request2_Response {
         $req = $this->createHttpRequest();
@@ -741,9 +706,19 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $resp = $req->send();
 
         // Log it?
-        if ($log) {
-            $log->mask($this->getConfig('api_key'), '***api_key***');
+        if ($logTitle) {
+            $log = $this->getDi()->invoiceLogTable->createRecord();
+            if ($this->getConfig('disable_postback_log')) {
+                $log->toggleDisablePostbackLog(true);
+            }
+            if ($this->invoice) {
+                $log->setInvoice($this->invoice);
+            }
             $log->paysys_id = $this->getId();
+            $log->remote_addr = $_SERVER['REMOTE_ADDR'];
+            $log->type = self::LOG_REQUEST;
+            $log->title = $logTitle;
+            $log->mask($this->getConfig('api_key'), '***api_key***');
             $log->add($req);
             $log->add($resp);
         }
@@ -752,28 +727,24 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         return $resp;
     }
 
-    public function updatePaddleCustomer(Am_Event $e): void
+    protected function updatePaddleCustomer(Invoice $invoice): void
     {
         // Vars
-        $user = $e->getUser();
+        $user = $invoice->getUser();
         $add = $user->data()->get(static::ADDRESS_ID);
         $biz = $user->data()->get(static::BUSINESS_ID);
         $ctm = $user->data()->get(static::CUSTOMER_ID);
 
-        // Prepare log
-        $log = $this->getDi()->invoiceLogRecord;
-        $log->title = 'CUSTOMER UPDATE';
-        $log->user_id = $user->user_id;
-        $log->invoice_id = null;
-
-        // Create/update customer
+        // Create/fetch customer
+        // Note: If customer exists (409), the ctm_id is in the error message
+        // @see: https://developer.paddle.com/errors/customers/customer_already_exists
         if (!$ctm) {
             $resp = $this->_sendRequest(
                 'customers',
                 ['email' => $user->email, 'name' => $user->getName()],
-                $log
+                'CUSTOMER UPDATE'
             );
-            if (!in_array($resp->getStatus(), [200, 409])) {
+            if (!in_array($resp->getStatus(), [201, 409])) {
                 throw new Am_Exception_InternalError('Customer error: '.$resp->getBody());
             }
             $body = @json_decode($resp->getBody(), true);
@@ -784,20 +755,22 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // Create/Update Address
         if ($ctm && !empty($user->country)) {
             $update = ($add) ? "/{$add}" : '';
+            $method = ($add) ? 'PATCH' : Am_HttpRequest::METHOD_POST; // no METHOD_PATCH!
             $resp = $this->_sendRequest(
                 "customers/{$ctm}/addresses".$update,
                 [
                     'country_code' => $user->country, // req
-                    'description' => 'aMember user #'.$user->login,
+                    'description' => $this->getDi()->config->get('site_title').': aMember user',
                     'first_line' => $user->street,
                     'second_line' => $user->street2,
-                    'city' => $user->country,
-                    'postal_code' => $user->country,
+                    'city' => $user->city,
+                    'postal_code' => $user->zip,
                     'region' => Am_SimpleTemplate::state($user->state),
                 ],
-                $log
+                'ADDRESS UPDATE',
+                $method
             );
-            if (200 !== $resp->getStatus()) {
+            if (!in_array($resp->getStatus(), [200, 201])) {
                 throw new Am_Exception_InternalError('Address error: '.$resp->getBody());
             }
             $body = @json_decode($resp->getBody(), true);
@@ -812,7 +785,8 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             $resp = $this->_sendRequest(
                 "customers/{$ctm}/businesses",
                 ['search' => $user->tax_id],
-                $log
+                'GET BUSINESS',
+                Am_HttpRequest::METHOD_GET
             );
             if (200 !== $resp->getStatus()) {
                 throw new Am_Exception_InternalError('Business error: '.$resp->getBody());
@@ -1108,15 +1082,11 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
 
     public function fetchUserInfo()
     {
-        // * Prepare log
-        $log = Am_Di::getInstance()->invoiceLogRecord;
-        $log->title = 'GET CUSTOMER';
-        $log->user_id = $this->invoice->user_id;
-        $log->invoice_id = $this->invoice->pk();
+        // Get the transaction again, this time with customer details included
+        // It's faster than calling each API seperately!
+        $resp = $this->getPlugin()->_sendRequest('transactions/'.$this->getReceiptId().'?include=address,business,customer', null, 'GET TRANSACTION', Am_HttpRequest::METHOD_GET);
 
-        $resp = $this->getPlugin()->_sendRequest('customers/'.$this->generateUserExternalId([]), null, $log, Am_HttpRequest::METHOD_GET);
-
-        // * Decode and check transaction ID
+        // Decode and check transaction ID
         $body = @json_decode($resp->getBody(), true);
         if (empty($body['data']['id'])) {
             throw new Am_Exception_InternalError('Bad response: '.$resp->getBody());
@@ -1128,6 +1098,9 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
             'email' => $body['email'],
             'name_f' => $name_f,
             'name_l' => $name_l,
+            'country' => $body['address']['country_code'],
+            'zip' => $body['address']['postal_code'],
+            'tax_id' => $body['business']['tax_identifier'],
         ];
     }
 
@@ -1176,6 +1149,18 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
             }
         }
         $this->invoice->data()->set(Am_Paysystem_PaddleBilling::TXNITM, $line_items)->update();
+
+        // Backfill user details, as customer may have added extra
+        // info via the checkout form (like tax id, address etc)
+        // NB: This doesn't CHANGE existing user data, just adds to it!
+        $user = $this->invoice->getUser();
+        if ($user) {
+            try {
+                $this->fillInUserFields($user);
+            } catch (Exception $e) {
+                // Don't sweat it
+            }
+        }
 
         // Save the customer, address and business ids
         $add = $user->data()->set(static::ADDRESS_ID, $this->event['data']['address_id']);
@@ -1241,7 +1226,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
      */
     public function processValidated(): void
     {
-        // * Handle webhook alerts
+        // Handle webhook alerts
         switch ($this->event['event_type']) {
             case 'subscription.created':
                 // Save subscription ID
@@ -1306,7 +1291,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
      */
     public function processValidated(): void
     {
-        // * Handle webhook alerts
+        // Handle webhook alerts
         switch ($this->event['data']['action']) {
             case 'credit_reverse':
             case 'credit':
