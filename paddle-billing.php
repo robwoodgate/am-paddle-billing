@@ -366,7 +366,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $user = $invoice->getUser();
         $ctm = $user->data()->get(static::CUSTOMER_ID);
         if ($ctm) {
-            $config[] = [
+            $config['customer'] = [
                 'id' => $ctm,
                 'address' => ['id' => $user->data()->get(static::ADDRESS_ID)],
                 'business' => ['id' => $user->data()->get(static::BUSINESS_ID)],
