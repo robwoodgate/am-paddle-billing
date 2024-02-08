@@ -488,11 +488,14 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         );
 
         // Check response
+        $body = @json_decode($resp->getBody(), true);
         if (200 !== $resp->getStatus()) {
-            $body = @json_decode($resp->getBody(), true);
-            $result->setFailed('An error occurred while processing your cancellation request: '.$body['error']['detail']);
+            $code = $body['error']['code'] ?? null;
+            if (in_array($code, ['subscription_update_when_canceled', 'subscription_is_canceled_action_invalid'])) {
+                $result->setFailed('An error occurred while processing your cancellation request: '.$body['error']['detail']);
 
-            return;
+                return;
+            }
         }
 
         $invoice->setCancelled(true);
