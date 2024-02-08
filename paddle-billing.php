@@ -1130,7 +1130,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
         $products = [];
         foreach ($this->event['data']['details']['line_items'] as $txnitm) {
             $bp = $this->getPlugin()->getDi()->billingPlanTable->findFirstByData(
-                Am_Paysystem_Paddle::PRICE_ID,
+                Am_Paysystem_PaddleBilling::PRICE_ID,
                 $txnitm['price_id']
             );
             if ($bp) {
@@ -1256,7 +1256,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
             case 'subscription.created':
                 // Save subscription ID
                 $this->invoice->data()->set(
-                    Am_Paysystem_Paddle::SUBSCRIPTION_ID,
+                    Am_Paysystem_PaddleBilling::SUBSCRIPTION_ID,
                     $this->event['data']['id']
                 )->update();
 
