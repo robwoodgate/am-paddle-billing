@@ -764,7 +764,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 "customers/{$ctm}/addresses".$update,
                 [
                     'country_code' => $user->country, // req
-                    'description' => $this->getDi()->config->get('site_title').': aMember user',
+                    'description' => $this->getDi()->config->get('site_title').' (aMember)',
                     'first_line' => $user->street,
                     'second_line' => $user->street2,
                     'city' => $user->city,
