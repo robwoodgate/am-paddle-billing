@@ -753,7 +753,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             }
             $body = @json_decode($resp->getBody(), true);
             $ctm = $body['data']['id'] ?? substr($body['error']['detail'] ?? '', 45);
-            $user->data()->set(static::CUSTOMER_ID, $ctm);
+            $user->data()->set(static::CUSTOMER_ID, $ctm)->update();
         }
 
         // Create/Update Address
@@ -778,7 +778,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 throw new Am_Exception_InternalError('Address error: '.$resp->getBody());
             }
             $body = @json_decode($resp->getBody(), true);
-            $user->data()->set(static::ADDRESS_ID, $body['data']['id']);
+            $user->data()->set(static::ADDRESS_ID, $body['data']['id'])->update();
         }
 
         // Update Business
@@ -796,7 +796,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 throw new Am_Exception_InternalError('Business error: '.$resp->getBody());
             }
             $body = @json_decode($resp->getBody(), true);
-            $user->data()->set(static::BUSINESS_ID, $body['data'][0]['id'] ?? null);
+            $user->data()->set(static::BUSINESS_ID, $body['data'][0]['id'] ?? null)->update();
         }
     }
 
@@ -1179,6 +1179,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
             Am_Paysystem_PaddleBilling::CUSTOMER_ID,
             $this->event['data']['customer_id']
         );
+        $user->update(); // commit
 
         // Add payment / access
         if (0 == (float) $this->invoice->first_total
