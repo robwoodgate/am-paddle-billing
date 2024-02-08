@@ -1167,9 +1167,18 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
         }
 
         // Save the customer, address and business ids
-        $add = $user->data()->set(static::ADDRESS_ID, $this->event['data']['address_id']);
-        $biz = $user->data()->set(static::BUSINESS_ID, $this->event['data']['business_id']);
-        $ctm = $user->data()->set(static::CUSTOMER_ID, $this->event['data']['customer_id']);
+        $add = $user->data()->set(
+            Am_Paysystem_PaddleBilling::ADDRESS_ID,
+            $this->event['data']['address_id']
+        );
+        $biz = $user->data()->set(
+            Am_Paysystem_PaddleBilling::BUSINESS_ID,
+            $this->event['data']['business_id']
+        );
+        $ctm = $user->data()->set(
+            Am_Paysystem_PaddleBilling::CUSTOMER_ID,
+            $this->event['data']['customer_id']
+        );
 
         // Add payment / access
         if (0 == (float) $this->invoice->first_total
@@ -1303,19 +1312,6 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
     }
 
     /**
-     * Return payment amount of the transaction
-     * @throws Am_Exception_Paysystem if it is not a payment transaction
-     * @return double|null number or null to use default value from invoice
-     */
-    protected function getAmount()
-    {
-        // Convert back to decimal: eg: USD 100 => USD 1.00
-        $amount = $this->event['data']['totals']['total'];
-        $currency = $this->event['data']['totals']['currency_code'];
-        return $amount / pow(10, Am_Currency::$currencyList[$currency]['precision']);
-    }
-
-    /**
      * Provision access based on webhooks.
      *
      * @see https://developer.paddle.com/build/subscriptions/provision-access-webhooks
@@ -1406,5 +1402,21 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                     $user->lock(false);
                 }
         }
+    }
+
+    /**
+     * Return payment amount of the transaction.
+     *
+     * @return null|float number or null to use default value from invoice
+     *
+     * @throws Am_Exception_Paysystem if it is not a payment transaction
+     */
+    protected function getAmount()
+    {
+        // Convert back to decimal: eg: USD 100 => USD 1.00
+        $amount = $this->event['data']['totals']['total'];
+        $currency = $this->event['data']['totals']['currency_code'];
+
+        return $amount / pow(10, Am_Currency::$currencyList[$currency]['precision']);
     }
 }
