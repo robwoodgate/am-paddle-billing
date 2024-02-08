@@ -356,11 +356,11 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $ctm = $user->data()->get(static::CUSTOMER_ID);
         $customer = '';
         if ($ctm) {
-            $customer['customer'] = [
+            $customer = ['customer' => [
                 'id' => $ctm,
                 'address' => ['id' => $add],
                 'business' => ['id' => $biz],
-            ];
+            ]];
             $customer = json_encode($customer);
         }
         $a->form = <<<CUT
