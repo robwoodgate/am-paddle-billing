@@ -348,41 +348,36 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $a = new Am_Paysystem_Action_HtmlTemplate('pay.phtml');
         $a->invoice = $invoice;
         $environment = $this->isSandbox() ? 'Paddle.Environment.set("sandbox");' : '';
-        $txnid = $body['data']['id'];
-        $thanks_url = $this->getReturnUrl();
+        $config = [
+            'transactionId' => $body['data']['id'],
+            'settings' => [
+                'displayMode' => 'inline',
+                'theme' => 'light',
+                'locale' => 'en',
+                'frameTarget' => 'checkout-container',
+                'frameInitialHeight' => '450',
+                'frameStyle' => "'width' => 100%; min-'width' => 312px; background-'color' => transparent; 'border' => none;",
+                'showAddTaxId' => true,
+                'allowLogout' => false,
+                'showAddDiscounts' => false,
+                'successUrl' => $this->getReturnUrl(),
+            ],
+        ];
         $user = $invoice->getUser();
-        $add = $user->data()->get(static::ADDRESS_ID);
-        $biz = $user->data()->get(static::BUSINESS_ID);
         $ctm = $user->data()->get(static::CUSTOMER_ID);
-        $customer = '';
         if ($ctm) {
-            $customer = ['customer' => [
+            $config[] = [
                 'id' => $ctm,
-                'address' => ['id' => $add],
-                'business' => ['id' => $biz],
-            ]];
-            $customer = json_encode($customer);
+                'address' => ['id' => $user->data()->get(static::ADDRESS_ID)],
+                'business' => ['id' => $user->data()->get(static::BUSINESS_ID)],
+            ];
         }
+        $config = json_encode($config, JSON_PRETTY_PRINT);
         $a->form = <<<CUT
             <div class="checkout-container"></div>
             <script>
                 {$environment}
-                Paddle.Checkout.open({
-                    transactionId: "{$txnid}",
-                    settings: {
-                        displayMode: "inline",
-                        theme: "light",
-                        locale: "en",
-                        frameTarget: "checkout-container",
-                        frameInitialHeight: "450",
-                        frameStyle: "width: 100%; min-width: 312px; background-color: transparent; border: none;",
-                        showAddTaxId: true,
-                        allowLogout: false,
-                        showAddDiscounts: false,
-                        successUrl: "{$thanks_url}",
-                    },
-                    {$customer}
-                });
+                Paddle.Checkout.open({$config});
             </script>
             CUT;
 
