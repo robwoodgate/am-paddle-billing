@@ -796,8 +796,8 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // one has been previously registered with Paddle for their VAT ID
         if (!$biz && $user->tax_id) {
             $resp = $this->_sendRequest(
-                "customers/{$ctm}/businesses",
-                ['search' => $user->tax_id],
+                "customers/{$ctm}/businesses?search={$user->tax_id}",
+                null,
                 'GET BUSINESS',
                 Am_HttpRequest::METHOD_GET
             );
@@ -1178,15 +1178,15 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
         }
 
         // Save the customer, address and business ids
-        $add = $user->data()->set(
+        $user->data()->set(
             Am_Paysystem_PaddleBilling::ADDRESS_ID,
             $this->event['data']['address_id']
         );
-        $biz = $user->data()->set(
+        $user->data()->set(
             Am_Paysystem_PaddleBilling::BUSINESS_ID,
             $this->event['data']['business_id']
         );
-        $ctm = $user->data()->set(
+        $user->data()->set(
             Am_Paysystem_PaddleBilling::CUSTOMER_ID,
             $this->event['data']['customer_id']
         );
