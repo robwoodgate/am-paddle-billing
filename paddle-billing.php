@@ -377,7 +377,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             <div class="checkout-container"></div>
             <script>
                 {$environment}
-                Paddle.Checkout.open({$config});
+                Paddle.Checkout.open(JSON.parse({$config}));
             </script>
             CUT;
 
