@@ -372,7 +372,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 'business' => ['id' => $user->data()->get(static::BUSINESS_ID)],
             ];
         }
-        $config = json_encode($config, JSON_PRETTY_PRINT);
+        $config = json_encode($config);
         $a->form = <<<CUT
             <div class="checkout-container"></div>
             <script>
