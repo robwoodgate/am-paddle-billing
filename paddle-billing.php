@@ -639,11 +639,11 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             4. In the Developer > <a href="https://vendors.paddle.com/notifications">Notifications</a> menu of your Paddle account, set the following webhook endpoint to listen for these webhook events:
 
             &bull; <code>transaction.completed</code>
-            &bull; <code>adjustment.created</code>
-            &bull; <code>adjustment.updated</code>
+            &bull; <code>subscription.cancelled</code>
             &bull; <code>subscription.created</code>
             &bull; <code>subscription.updated</code>
-            &bull; <code>subscription.cancelled</code>
+            &bull; <code>adjustment.created</code>
+            &bull; <code>adjustment.updated</code>
 
             Webhook Endpoint: <input type="text" value="{$whk_url}" size="50" onclick="this.select();"></input>
 
