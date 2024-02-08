@@ -550,7 +550,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         );
 
         // Check response
-        if (200 !== $resp->getStatus()) {
+        if (201 !== $resp->getStatus()) {
             $body = @json_decode($resp->getBody(), true);
             $result->setFailed('An error occurred while processing your refund request: '.$body['error']['detail']);
 
