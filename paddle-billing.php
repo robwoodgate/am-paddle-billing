@@ -491,7 +491,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $body = @json_decode($resp->getBody(), true);
         if (200 !== $resp->getStatus()) {
             $code = $body['error']['code'] ?? null;
-            if (in_array($code, ['subscription_update_when_canceled', 'subscription_is_canceled_action_invalid'])) {
+            if (!in_array($code, ['subscription_update_when_canceled', 'subscription_is_canceled_action_invalid'])) {
                 $result->setFailed($body['error']['detail']);
 
                 return;
