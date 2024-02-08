@@ -739,38 +739,49 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $biz = $user->data()->get(static::BUSINESS_ID);
         $ctm = $user->data()->get(static::CUSTOMER_ID);
 
-        // Create/fetch customer
-        // Note: If customer exists (409), the ctm_id is in the error message
+        // Create/fetch customer - if exists (409), the ctm_id is in the error
         // @see: https://developer.paddle.com/errors/customers/customer_already_exists
+        // NB: We are purposely not reactivating archived users. This allows
+        // customers to be "banned" from ordering in Paddle by archiving them.
         if (!$ctm) {
             $resp = $this->_sendRequest(
                 'customers',
                 ['email' => $user->email, 'name' => $user->getName()],
                 'CUSTOMER UPDATE'
             );
-            if (!in_array($resp->getStatus(), [201, 409])) {
+            $body = @json_decode($resp->getBody(), true);
+            if (in_array($resp->getStatus(), [201, 409])) {
+                $ctm = $body['data']['id'] ?? null; // created
+                $code = $body['error']['code'] ?? null;
+                if ('customer_already_exists' == $code) {
+                    $ctm = substr($body['error']['detail'], 45); // existing
+                }
+                $user->data()->set(static::CUSTOMER_ID, $ctm)->update();
+            } else {
+                // Something bad happened... bail!
                 throw new Am_Exception_InternalError('Customer error: '.$resp->getBody());
             }
-            $body = @json_decode($resp->getBody(), true);
-            $ctm = $body['data']['id'] ?? substr($body['error']['detail'] ?? '', 45);
-            $user->data()->set(static::CUSTOMER_ID, $ctm)->update();
         }
 
-        // Create/Update Address
+        // Create/Update Address, unarchiving existing if needed
         if ($ctm && !empty($user->country)) {
+            $params = [
+                'country_code' => $user->country, // req
+                'description' => $this->getDi()->config->get('site_title').' (aMember)',
+                'first_line' => $user->street,
+                'second_line' => $user->street2,
+                'city' => $user->city,
+                'postal_code' => $user->zip,
+                'region' => Am_SimpleTemplate::state($user->state),
+            ];
+            if ($add) {
+                $params['status'] = 'active'; // in case archived!
+            }
             $update = ($add) ? "/{$add}" : '';
             $method = ($add) ? 'PATCH' : Am_HttpRequest::METHOD_POST; // no METHOD_PATCH!
             $resp = $this->_sendRequest(
                 "customers/{$ctm}/addresses".$update,
-                [
-                    'country_code' => $user->country, // req
-                    'description' => $this->getDi()->config->get('site_title').' (aMember)',
-                    'first_line' => $user->street,
-                    'second_line' => $user->street2,
-                    'city' => $user->city,
-                    'postal_code' => $user->zip,
-                    'region' => Am_SimpleTemplate::state($user->state),
-                ],
+                $params,
                 'ADDRESS UPDATE',
                 $method
             );
@@ -781,7 +792,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             $user->data()->set(static::ADDRESS_ID, $body['data']['id'])->update();
         }
 
-        // Update Business
+        // Fetch Business ID
         // NB: We don't create businesses here as a Business name is required,
         // but aMember only requests a VAT ID, not the name. So just see if
         // one has been previously registered with Paddle for their VAT ID
@@ -792,11 +803,13 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 'GET BUSINESS',
                 Am_HttpRequest::METHOD_GET
             );
-            if (200 !== $resp->getStatus()) {
-                throw new Am_Exception_InternalError('Business error: '.$resp->getBody());
+            if (200 == $resp->getStatus()) {
+                $body = @json_decode($resp->getBody(), true);
+                $user->data()
+                    ->set(static::BUSINESS_ID, $body['data'][0]['id'] ?? null)
+                    ->update()
+                ;
             }
-            $body = @json_decode($resp->getBody(), true);
-            $user->data()->set(static::BUSINESS_ID, $body['data'][0]['id'] ?? null)->update();
         }
     }
 
