@@ -356,7 +356,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 'locale' => 'en',
                 'frameTarget' => 'checkout-container',
                 'frameInitialHeight' => '450',
-                'frameStyle' => 'width=100%; min-width=312px; background-color=transparent; border=none;',
+                'frameStyle' => 'width:100%; min-width:312px; background-color:transparent; border:none;',
                 'showAddTaxId' => true,
                 'allowLogout' => false,
                 'showAddDiscounts' => false,
