@@ -1303,6 +1303,19 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
     }
 
     /**
+     * Return payment amount of the transaction
+     * @throws Am_Exception_Paysystem if it is not a payment transaction
+     * @return double|null number or null to use default value from invoice
+     */
+    protected function getAmount()
+    {
+        // Convert back to decimal: eg: USD 100 => USD 1.00
+        $amount = $this->event['data']['totals']['total'];
+        $currency = $this->event['data']['totals']['currency_code'];
+        return $amount / pow(10, Am_Currency::$currencyList[$currency]['precision']);
+    }
+
+    /**
      * Provision access based on webhooks.
      *
      * @see https://developer.paddle.com/build/subscriptions/provision-access-webhooks
@@ -1318,7 +1331,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                     'credit' == $this->event['data']['action']
                         ? ___('issued') : ___('reversed'),
                     Am_Currency::render(
-                        $this->event['data']['totals']['total'],
+                        $this->getAmount(),
                         $this->event['data']['totals']['currency_code']
                     ),
                     $this->invoice->invoice_id.'/'.$this->invoice->public_id
@@ -1338,7 +1351,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                     $this->invoice->addRefund(
                         $this,
                         $this->getReceiptId(),
-                        $this->event['data']['totals']['total']
+                        $this->getAmount()
                     );
                 } catch (Am_Exception_Db_NotUnique $e) {
                     // Refund already added
