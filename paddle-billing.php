@@ -1312,6 +1312,22 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
     }
 
     /**
+     * Return payment amount of the transaction.
+     *
+     * @return null|float number or null to use default value from invoice
+     *
+     * @throws Am_Exception_Paysystem if it is not a payment transaction
+     */
+    public function getAmount()
+    {
+        // Convert back to decimal: eg: USD 100 => USD 1.00
+        $amount = $this->event['data']['totals']['total'];
+        $currency = $this->event['data']['totals']['currency_code'];
+
+        return $amount / pow(10, Am_Currency::$currencyList[$currency]['precision']);
+    }
+
+    /**
      * Provision access based on webhooks.
      *
      * @see https://developer.paddle.com/build/subscriptions/provision-access-webhooks
@@ -1402,21 +1418,5 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                     $user->lock(false);
                 }
         }
-    }
-
-    /**
-     * Return payment amount of the transaction.
-     *
-     * @return null|float number or null to use default value from invoice
-     *
-     * @throws Am_Exception_Paysystem if it is not a payment transaction
-     */
-    protected function getAmount()
-    {
-        // Convert back to decimal: eg: USD 100 => USD 1.00
-        $amount = $this->event['data']['totals']['total'];
-        $currency = $this->event['data']['totals']['currency_code'];
-
-        return $amount / pow(10, Am_Currency::$currencyList[$currency]['precision']);
     }
 }
