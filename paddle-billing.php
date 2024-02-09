@@ -1114,10 +1114,10 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
             throw new Am_Exception_InternalError('Bad response: '.$resp->getBody());
         }
 
-        [$name_f, $name_l] = explode(' ', $body['name']);
+        [$name_f, $name_l] = explode(' ', $body['customer']['name']);
 
         return [
-            'email' => $body['email'],
+            'email' => $body['customer']['email'],
             'name_f' => $name_f,
             'name_l' => $name_l,
             'country' => $body['address']['country_code'],
