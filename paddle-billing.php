@@ -505,7 +505,10 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     public function processRefund(InvoicePayment $payment, Am_Paysystem_Result $result, $amount)
     {
         // Paddle refunds are not instantaneous - they get requested via API
-        // and approved by Paddle staff, at which point a webhook alert is issued
+        // and approved by Paddle staff. They are usually approved, but may be
+        // rejected if they find evidence of fraud, refund abuse, or other
+        // manipulative behaviour that entitles Paddle to counterclaim the refund.
+        // @see: https://www.paddle.com/legal/checkout-buyer-terms
 
         // Get invoice
         $this->invoice = $payment->getInvoice();
@@ -527,7 +530,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             ];
         }
 
-        // Multi-item partial refunds must be handled via Paddle
+        // Multi-item partial refunds must be handled via Paddle Dashboard
         // because we can't allocate the refund amount to items here
         // Otherwise, add the amount for a partial refund
         if ('partial' == $type) {
@@ -562,7 +565,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
         $result->setSuccess();
         // We will not add refund record here because it will be handled by
-        // IPN script once the refund is approved and processed by Paddle.
+        // IPN script once the refund adjustment record is created by Paddle.
     }
 
     /**
@@ -805,8 +808,9 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             if (200 == $resp->getStatus()) {
                 $body = @json_decode($resp->getBody(), true);
                 foreach ($body['data'] as $biz) {
-                    if(strpos($biz['tax_identifier'], $user->tax_id) !== false) {
+                    if (false !== strpos($biz['tax_identifier'], $user->tax_id)) {
                         $user->data()->set(static::BUSINESS_ID, $biz['id'])->update();
+
                         break; // done
                     }
                 }
@@ -1260,7 +1264,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
                 // Save subscription ID
                 $this->invoice->data()->set(
                     Am_Paysystem_PaddleBilling::SUBSCRIPTION_ID,
-                    $this->event['data']['id']
+                    $this->getUniqId()
                 )->update();
 
                 break;
@@ -1370,8 +1374,16 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
             case 'refund':
                 // NB: Refund adjustments are created with pending status,
                 // and updated when Paddle approves or rejects the refund
-                if ('approved' != $this->event['data']['status']) {
-                    return;
+                // so we add it immediately and remove it if rejected
+                if ('rejected' == $this->event['data']['status']) {
+                    $this->getPlugin()->getDi()->invoiceRefundTable->deleteBy(
+                        [
+                            'transaction_id' => $this->getReceiptId(),
+                            'receipt_id' => $this->getUniqId(),
+                            'invoice_id' => $this->invoice->invoice_id,
+                        ]
+                    );
+                    return; // all done
                 }
 
                 try {
