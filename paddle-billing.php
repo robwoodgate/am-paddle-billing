@@ -794,19 +794,22 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // NB: We don't create businesses here as a Business name is required,
         // but aMember only requests a VAT ID, not the name. So just see if
         // one has been previously registered with Paddle for their VAT ID
+        // Note: The API search param doesn't work, so we have to loop!
         if (!$biz && $user->tax_id) {
             $resp = $this->_sendRequest(
-                "customers/{$ctm}/businesses?search={$user->tax_id}",
+                "customers/{$ctm}/businesses?per_page=200",
                 null,
                 'GET BUSINESS',
                 Am_HttpRequest::METHOD_GET
             );
             if (200 == $resp->getStatus()) {
                 $body = @json_decode($resp->getBody(), true);
-                $user->data()
-                    ->set(static::BUSINESS_ID, $body['data'][0]['id'] ?? null)
-                    ->update()
-                ;
+                foreach ($body['data'] as $biz) {
+                    if(strpos($biz['tax_identifier'], $user->tax_id) !== false) {
+                        $user->data()->set(static::BUSINESS_ID, $biz['id'])->update();
+                        break; // done
+                    }
+                }
             }
         }
     }
