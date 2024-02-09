@@ -641,7 +641,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
             &bull; <code>transaction.completed</code>
             &bull; <code>subscription.cancelled</code>
-            &bull; <code>subscription.created</code>
             &bull; <code>subscription.updated</code>
             &bull; <code>adjustment.created</code>
             &bull; <code>adjustment.updated</code>
@@ -990,7 +989,6 @@ class Am_Paysystem_Transaction_PaddleBilling_Webhook extends Am_Paysystem_Transa
 
                 break;
 
-            case 'subscription.created':
             case 'subscription.updated':
             case 'subscription.cancelled':
                 return new Am_Paysystem_PaddleBilling_Webhook_Subscription($plugin, $request, $response, $invokeArgs);
@@ -1164,6 +1162,18 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
      */
     public function processValidated(): void
     {
+        // Save subscription ID (if set)
+        // We have to do it here as the subscription.created webhook can arrive
+        // BEFORE transaction.completed and fail for auto-created invoices
+        // Saves us adding the subscription.created webhook too...
+        $subscription_id = $this->event['data']['subscription_id'];
+        if ($subscription_id) {
+            $this->invoice->data()->set(
+                Am_Paysystem_PaddleBilling::SUBSCRIPTION_ID,
+                $subscription_id
+            )->update();
+        }
+
         // Save the billed line items in case of refund
         // @see processRefund()
         $line_items = [];
@@ -1262,14 +1272,6 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
     {
         // Handle webhook alerts
         switch ($this->event['event_type']) {
-            case 'subscription.created':
-                // Save subscription ID
-                $this->invoice->data()->set(
-                    Am_Paysystem_PaddleBilling::SUBSCRIPTION_ID,
-                    $this->getUniqId()
-                )->update();
-
-                break;
 
             case 'subscription.updated':
                 // Update recurring status
