@@ -1114,15 +1114,17 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
             throw new Am_Exception_InternalError('Bad response: '.$resp->getBody());
         }
 
-        [$name_f, $name_l] = explode(' ', $body['customer']['name']);
+        // Name is a free-form text field, so...
+        $name_f = strtok($body['data']['customer']['name'], ' ');
+        $name_l = strtok(' ');
 
         return [
-            'email' => $body['customer']['email'],
-            'name_f' => $name_f,
-            'name_l' => $name_l,
-            'country' => $body['address']['country_code'],
-            'zip' => $body['address']['postal_code'],
-            'tax_id' => $body['business']['tax_identifier'],
+            'email' => $body['data']['customer']['email'],
+            'name_f' => (string) $name_f,
+            'name_l' => (string) $name_l,
+            'country' => $body['data']['address']['country_code'],
+            'zip' => $body['data']['address']['postal_code'],
+            'tax_id' => $body['data']['business']['tax_identifier'],
         ];
     }
 
@@ -1383,6 +1385,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                             'invoice_id' => $this->invoice->invoice_id,
                         ]
                     );
+
                     return; // all done
                 }
 
