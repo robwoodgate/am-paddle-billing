@@ -364,13 +364,16 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             ],
         ];
         $user = $invoice->getUser();
-        $ctm = $user->data()->get(static::CUSTOMER_ID);
-        if ($ctm) {
-            $config['customer'] = [
-                'id' => $ctm,
-                'address' => ['id' => $user->data()->get(static::ADDRESS_ID)],
-                'business' => ['id' => $user->data()->get(static::BUSINESS_ID)],
-            ];
+        if ($ctm = $user->data()->get(static::CUSTOMER_ID)) {
+            $config['customer'] = ['id' => $ctm];
+            // Address requires customer
+            if ($add = $user->data()->get(static::ADDRESS_ID)) {
+                $config['customer']['address'] = ['id' => $add];
+                // Business requires an address
+                if ($biz = $user->data()->get(static::BUSINESS_ID)) {
+                    $config['customer']['business'] = ['id' => $biz];
+                }
+            }
         }
         $config = json_encode($config);
         $a->form = <<<CUT
@@ -1272,7 +1275,6 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
     {
         // Handle webhook alerts
         switch ($this->event['event_type']) {
-
             case 'subscription.updated':
                 // Update recurring status
                 if (in_array($this->event['data']['status'], ['active', 'trialing'])) {
