@@ -110,8 +110,12 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
     public function allowPartialRefunds()
     {
-        // @see processRefund()
-        return true;
+        // Payments *can* be partially refunded via Paddle, but we can't allow
+        // that via aMember because Paddle subscription payments can be made in
+        // customer's local currency, which may be different to the aMember
+        // invoice currency. Also, partial refunds need to be allocated across
+        // the items in the transaction @see processRefund()
+        return false;
     }
 
     public function getRecurringType()
@@ -153,6 +157,9 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
         // Add Extra fields
         $fs = $this->getExtraSettingsFieldSet($form);
+        $fs->addAdvCheckbox('allow_localize')->setLabel('Allow Currency Localization
+        If checked, will allow payment in the user\'s local currency. Leave disabled to force payment in the invoice currency.');
+
         $fs->addAdvCheckbox('cbw_lock')->setLabel('Lock User Account on Chargeback Warning
         If checked, will add a note and lock the user account if Paddle gets a warning of an upcoming chargeback.');
         $fs->addAdvCheckbox('cbk_lock')->setLabel('Lock User Account on Chargeback
@@ -187,12 +194,12 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $this->updatePaddleCustomer($invoice);
 
         // Prepare transaction params
-        $params = [
-            'currency_code' => $invoice->currency,
-            'custom_data' => [
-                static::CUSTOM_DATA_INV => $invoice->public_id,
-            ],
-        ];
+        $params = ['custom_data' => [static::CUSTOM_DATA_INV => $invoice->public_id]];
+
+        // Force payment in invoice currency?
+        if (!$this->getConfig('allow_localize')) {
+            $params['currency_code'] = $invoice->currency;
+        }
 
         // Filter to allow advanced customisation of the custom data
         // @see: https://docs.amember.com/API/HookManager/
@@ -367,7 +374,9 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         if ($ctm = $user->data()->get(static::CUSTOMER_ID)) {
             $config['customer'] = ['id' => $ctm];
             // Address requires customer
-            if ($add = $user->data()->get(static::ADDRESS_ID)) {
+            if (($add = $user->data()->get(static::ADDRESS_ID))
+                && !empty($user->country) && !empty($user->zip)
+            ) {
                 $config['customer']['address'] = ['id' => $add];
                 // Business requires an address
                 if ($biz = $user->data()->get(static::BUSINESS_ID)) {
@@ -376,11 +385,54 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             }
         }
         $config = json_encode($config);
+        $conversion_msg = sprintf(
+            '%1$s : <span class="currency">%2$s</span>',
+            ___('Payment Currency'),
+            $invoice->currency
+        );
         $a->form = <<<CUT
+            <div style="text-align:center;background-color:#d3dce3;padding:10px;margin:10px 0;" id="conversion-block">
+                <div><strong style="font-size:1.2em;">{$conversion_msg}</strong></div>
+                <div><strong>To Pay Today:</strong> <span class="currency">USD</span><span id="total">0.00</span></div>
+                <div style="font-size:0.8em;">(Includes Tax: <span class="currency">USD</span><span id="tax">0.00</span>)</div>
+                <div id="recurring-block" style="display:none;">
+                    <div><strong>Recurring amount:</strong> <span class="currency">USD</span><span id="recurring-total">0.00</span></div>
+                    <div style="font-size:0.8em;">(Includes Tax: <span class="currency">USD</span><span id="recurring-tax">0.00</span>)</div>
+                </div>
+            </div>
             <div class="checkout-container"></div>
             <script>
+                // DOM queries
+                const currencyLabels = document.querySelectorAll(".currency");
+                const taxEl = document.getElementById("tax");
+                const totalEl = document.getElementById("total");
+                const recurringTaxEl = document.getElementById("recurring-tax");
+                const recurringTotalEl = document.getElementById("recurring-total");
+                const recurringBlock = document.getElementById("recurring-block");
+
+                // Paddle engine
                 {$environment}
                 Paddle.Checkout.open(JSON.parse('{$config}'));
+
+                // Callbacks
+                window.addEventListener('paddleBillingEvent', function(e) {
+                    displayTotals(e.detail.data);
+                });
+                function displayTotals({ currency_code, totals, recurring_totals }) {
+                  // currency labels
+                  for (const currencyLabel of currencyLabels) {
+                    currencyLabel.innerHTML = currency_code + " ";
+                  }
+                  // today total
+                  taxEl.innerHTML = totals.tax.toFixed(2);
+                  totalEl.innerHTML = totals.total.toFixed(2);
+                  // recurring total
+                  if (typeof recurring_totals !== "undefined") {
+                    recurringBlock.style.display = "block";
+                    recurringTaxEl.innerHTML = recurring_totals.tax.toFixed(2);
+                    recurringTotalEl.innerHTML = recurring_totals.total.toFixed(2);
+                  }
+                }
             </script>
             CUT;
 
@@ -513,37 +565,16 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // manipulative behaviour that entitles Paddle to counterclaim the refund.
         // @see: https://www.paddle.com/legal/checkout-buyer-terms
 
-        // Get invoice
-        $this->invoice = $payment->getInvoice();
-
-        // Get refund type
-        $type = 'partial';
-        if (doubleval($amount) == doubleval($payment->amount)) {
-            $type = 'full';
-        }
-
         // Get the Paddle Transaction Item(s)
         // and build the items payload
         $items = [];
+        $this->invoice = $payment->getInvoice(); // for log
         $txnitms = $this->invoice->data()->get(static::TXNITM);
         foreach ($txnitms as $txnitm) {
             $items[] = [
-                'type' => $type,
+                'type' => 'full',
                 'item_id' => $txnitm,
             ];
-        }
-
-        // Multi-item partial refunds must be handled via Paddle Dashboard
-        // because we can't allocate the refund amount to items here
-        // Otherwise, add the amount for a partial refund
-        if ('partial' == $type) {
-            $items[0]['amount'] = $this->getAmount($amount, $this->invoice->currency);
-
-            if (count($items) > 1) {
-                $result->setFailed('Partial refunds for multi-product invoices must be requested from your Paddle account');
-
-                return;
-            }
         }
 
         // Make request
@@ -767,14 +798,14 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         }
 
         // Create/Update Address, unarchiving existing if needed
-        if ($ctm && !empty($user->country)) {
+        if ($ctm && !empty($user->country) && !empty($user->zip)) {
             $params = [
                 'country_code' => $user->country, // req
                 'description' => $this->getDi()->config->get('site_title').' (aMember)',
                 'first_line' => $user->street,
                 'second_line' => $user->street2,
                 'city' => $user->city,
-                'postal_code' => $user->zip,
+                'postal_code' => $user->zip, // req
                 'region' => Am_SimpleTemplate::state($user->state),
             ];
             if ($add) {
@@ -788,11 +819,10 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 'ADDRESS UPDATE',
                 $method
             );
-            if (!in_array($resp->getStatus(), [200, 201])) {
-                throw new Am_Exception_InternalError('Address error: '.$resp->getBody());
+            if (in_array($resp->getStatus(), [200, 201])) {
+                $body = @json_decode($resp->getBody(), true);
+                $user->data()->set(static::ADDRESS_ID, $body['data']['id'])->update();
             }
-            $body = @json_decode($resp->getBody(), true);
-            $user->data()->set(static::ADDRESS_ID, $body['data']['id'])->update();
         }
 
         // Fetch Business ID
@@ -940,21 +970,12 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                             showAddDiscounts: false,
                         }
                     },
-                    eventCallback: function(data) {
-                        switch(data.name) {
-                          case "checkout.loaded":
-                            console.log("Checkout opened");
-                            break;
-                          case "checkout.customer.created":
-                            console.log("Customer created");
-                            break;
-                          case "checkout.completed":
-                            console.log("Checkout completed");
-                            break;
-                          default:
-                            console.log(data.name);
-                        }
-                        console.log(data);
+                    eventCallback: function(event) {
+                        console.log(event);
+                        var evt = new CustomEvent('paddleBillingEvent', {
+                          "bubbles":true, "cancelable":false, "detail": event
+                        });
+                        document.dispatchEvent(evt);
                     }
                 });
             </script>
@@ -1379,7 +1400,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                 break;
 
             case 'refund':
-                // NB: Refund adjustments are created with pending status,
+                // Refund adjustments are created with pending status,
                 // and updated when Paddle approves or rejects the refund
                 // so we add it immediately and remove it if rejected
                 if ('rejected' == $this->event['data']['status']) {
