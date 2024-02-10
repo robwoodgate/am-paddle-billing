@@ -952,8 +952,9 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                             console.log("Checkout completed");
                             break;
                           default:
-                            console.log(data);
+                            console.log(data.name);
                         }
+                        console.log(data);
                     }
                 });
             </script>
