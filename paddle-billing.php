@@ -1377,6 +1377,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
                 if (in_array($this->event['data']['status'], ['paused', 'past_due'])) {
                     $this->invoice->setStatus(Invoice::RECURRING_FAILED); // self-checks
                 }
+                $this->log->add('Subscription status: '.$this->event['data']['status']);
 
                 // Update rebill date if this was changed in Paddle subscription
                 $rebill_date = $this->event['data']['next_billed_at'];
