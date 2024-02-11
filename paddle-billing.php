@@ -435,7 +435,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 });
                 function displayTotals({ currency_code, totals, recurring_totals }) {
                   // currency labels
-                  for (const currencyLabel of currencyLabels) {
+                  for (var currencyLabel of currencyLabels) {
                     currencyLabel.innerHTML = currency_code + " ";
                   }
                   // today total
