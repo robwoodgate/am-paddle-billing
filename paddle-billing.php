@@ -1401,17 +1401,22 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
         // Handle webhook alerts
         switch ($this->event['event_type']) {
             case 'subscription.updated':
+                // Vars
+                $status = $this->event['data']['status'];
+                $rebill_date = $this->event['data']['next_billed_at'];
+
                 // Update recurring status
-                if (in_array($this->event['data']['status'], ['active', 'trialing'])) {
+                if ($status != $this->invoice->status) {
+                    $this->log->add('Subscription status changed, now: '.$status);
+                }
+                if (in_array($status, ['active', 'trialing'])) {
                     $this->invoice->setStatus(Invoice::RECURRING_ACTIVE); // self-checks
                 }
-                if (in_array($this->event['data']['status'], ['paused', 'past_due'])) {
+                if (in_array($status, ['paused', 'past_due'])) {
                     $this->invoice->setStatus(Invoice::RECURRING_FAILED); // self-checks
                 }
-                $this->log->add('Subscription status: '.$this->event['data']['status']);
 
                 // Update rebill date if this was changed in Paddle subscription
-                $rebill_date = $this->event['data']['next_billed_at'];
                 if ($rebill_date && $this->invoice->rebill_date != sqlDate($rebill_date)) {
                     $this->log->add('Set rebill date to: '.sqlDate($rebill_date));
                     $this->invoice->updateQuick('rebill_date', sqlDate($rebill_date));
@@ -1419,7 +1424,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
 
                 // Extend access for past due invoices while they are in dunning
                 // If dunning fails, status will change to paused or canceled
-                if ('past_due' == $this->event['data']['status'] && $this->invoice->getAccessExpire() < $this->invoice->rebill_date) {
+                if ('past_due' == $status && $this->invoice->getAccessExpire() < $this->invoice->rebill_date) {
                     $this->invoice->extendAccessPeriod($this->invoice->rebill_date);
                     $this->log->add(
                         sprintf(
