@@ -431,6 +431,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
                 // Callbacks
                 window.addEventListener('paddleBillingEvent', function(e) {
+                    console.log(e.detail);
                     displayTotals(e.detail.data);
                 });
                 function displayTotals(data) {
