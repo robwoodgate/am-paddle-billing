@@ -50,6 +50,15 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             'thanks/success',
             new Am_Block_Base('Paddle Statement', 'paddle-statement', $this, [$this, 'renderStatement'])
         );
+        $this->getDi()->blocks->add(
+            'admin/user/invoice/details',
+            new Am_Block_Base('Paddle Subscription ID', 'paddle-subid', $this, function (Am_View $v) {
+                $sub_id = $v->invoice->data()->get(static::SUBSCRIPTION_ID);
+                if ($sub_id && $v->invoice->paysys_id == $this->getId()) {
+                    return 'Paddle Subscription ID: <a href="https://vendors.paddle.com/subscriptions-v2/'.$sub_id.'">'.$sub_id.'</a>';
+                }
+            })
+        );
     }
 
     public function renderStatement(Am_View $v)
@@ -723,7 +732,8 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $url,
         ?array $params = null,
         ?string $logTitle = null,
-        $method = Am_HttpRequest::METHOD_POST
+        $method = Am_HttpRequest::METHOD_POST,
+        ?Invoice $invoice = null
     ): HTTP_Request2_Response {
         $req = $this->createHttpRequest();
         $req->setUrl(($this->isSandbox() ? static::SANDBOX_URL : static::LIVE_URL).$url);
@@ -750,8 +760,9 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             if ($this->getConfig('disable_postback_log')) {
                 $log->toggleDisablePostbackLog(true);
             }
-            if ($this->invoice) {
-                $log->setInvoice($this->invoice);
+            $invoice ??= $this->invoice;
+            if ($invoice) {
+                $log->setInvoice($invoice);
             }
             $log->paysys_id = $this->getId();
             $log->remote_addr = $_SERVER['REMOTE_ADDR'];
@@ -1155,6 +1166,17 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
             return $public_id;
         }
 
+        // Try getting it by subscription ID
+        if (!empty($this->event['data']['subscription_id'])) {
+            $invoice = Am_Di::getInstance()->invoiceTable->findFirstByData(
+                Am_Paysystem_PaddleBilling::SUBSCRIPTION_ID,
+                $this->event['data']['subscription_id'] // sub_id
+            );
+            if ($invoice) {
+                return $invoice->public_id;
+            }
+        }
+
         // Try getting it by receipt id
         $invoice = Am_Di::getInstance()->invoiceTable->findByReceiptIdAndPlugin(
             $this->getReceiptId(),
@@ -1178,7 +1200,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
     {
         // Get the transaction again, this time with customer details included
         // It's faster than calling each API seperately!
-        $resp = $this->getPlugin()->_sendRequest('transactions/'.$this->getReceiptId().'?include=address,business,customer', null, 'GET TRANSACTION', Am_HttpRequest::METHOD_GET);
+        $resp = $this->getPlugin()->_sendRequest('transactions/'.$this->getReceiptId().'?include=address,business,customer', null, 'GET TRANSACTION', Am_HttpRequest::METHOD_GET, $this->invoice);
 
         // Decode and check transaction ID
         $body = @json_decode($resp->getBody(), true);
