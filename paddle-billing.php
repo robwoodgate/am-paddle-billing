@@ -24,6 +24,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     public const ADDRESS_ID = 'paddle-billing_add_id';
     public const BUSINESS_ID = 'paddle-billing_biz_id';
     public const CUSTOMER_ID = 'paddle-billing_ctm_id';
+    public const INV_XRATE = 'paddle-billing_xrate';
     public const TXNITM = 'paddle-billing_txnitm';
     public const LIVE_URL = 'https://api.paddle.com/';
     public const SANDBOX_URL = 'https://sandbox-api.paddle.com/';
@@ -1209,6 +1210,19 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
         }
         $this->invoice->data()->set(Am_Paysystem_PaddleBilling::TXNITM, $line_items)->update();
 
+        // Set the local/invoice exchange rate for localized payments
+        // The conversion is fixed for life of the subscription, so we can just
+        // calculate it and use it later in case of refunds
+        $amount = $this->event['data']['details']['totals']['total'];
+        $currency = $this->event['data']['details']['totals']['currency_code'];
+        $amount = $amount / pow(10, Am_Currency::$currencyList[$currency]['precision']);
+        $isFirst = ! ((doubleval($this->invoice->first_total) === 0.0) || $this->invoice->getPaymentsCount());
+        $inv_amt = $isFirst ? $this->invoice->first_total : $this->invoice->second_total;
+        if ($inv_amt > 0 && $inv_amt != $amount) {
+            $xrate = $amount / $inv_amt;
+            $this->invoice->data()->set(Am_Paysystem_PaddleBilling::INV_XRATE, $xrate)->update();
+        }
+
         // Backfill user details, as customer may have added extra
         // info via the checkout form (like tax id, address etc)
         // NB: This doesn't CHANGE existing user data, just adds to it!
@@ -1370,8 +1384,13 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
         // Convert back to decimal: eg: USD 100 => USD 1.00
         $amount = $this->event['data']['totals']['total'];
         $currency = $this->event['data']['totals']['currency_code'];
+        $amount = $amount / pow(10, Am_Currency::$currencyList[$currency]['precision']);
 
-        return $amount / pow(10, Am_Currency::$currencyList[$currency]['precision']);
+        // Convert back to the invoice currency exchange rate
+        $xrate = $this->invoice->data()->get(Am_Paysystem_PaddleBilling::INV_XRATE) ?? 1;
+        $amount = $amount / $xrate;
+
+        return Am_Currency::moneyRound($amount, $currency);
     }
 
     /**
