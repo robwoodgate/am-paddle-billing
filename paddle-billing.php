@@ -675,7 +675,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             4. In the Developer > <a href="https://vendors.paddle.com/notifications">Notifications</a> menu of your Paddle account, set the following webhook endpoint to listen for these webhook events:
 
             &bull; <code>transaction.completed</code>
-            &bull; <code>subscription.cancelled</code>
+            &bull; <code>subscription.canceled</code>
             &bull; <code>subscription.updated</code>
             &bull; <code>adjustment.created</code>
             &bull; <code>adjustment.updated</code>
@@ -764,6 +764,20 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
         // Return response
         return $resp;
+    }
+
+    /**
+     * Override the standard ipn logging to include event type.
+     *
+     * @param mixed $request
+     * @param mixed $response
+     */
+    protected function _logDirectAction(/* Am_Mvc_Request */ $request, /* Am_Mvc_Response */ $response, array $invokeArgs)
+    {
+        $event = json_decode($request->getRawBody(), true);
+        $type = $event['event_type'] ?? htmlentities($request->getActionName());
+
+        return $this->logRequest($request, "POSTBACK [{$type}]");
     }
 
     protected function updatePaddleCustomer(Invoice $invoice): void
@@ -1016,7 +1030,7 @@ class Am_Paysystem_Transaction_PaddleBilling_Webhook extends Am_Paysystem_Transa
                 break;
 
             case 'subscription.updated':
-            case 'subscription.cancelled':
+            case 'subscription.canceled':
                 return new Am_Paysystem_PaddleBilling_Webhook_Subscription($plugin, $request, $response, $invokeArgs);
 
                 break;
@@ -1084,13 +1098,41 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
 {
     protected $_qty = [];
 
+    /**
+     * Return payment amount of the transaction.
+     *
+     * @return null|float number or null to use default value from invoice
+     *
+     * @throws Am_Exception_Paysystem if it is not a payment transaction
+     */
+    public function getAmount()
+    {
+        // Convert back to decimal: eg: USD 100 => USD 1.00
+        $amount = $this->event['data']['details']['totals']['total'];
+        $currency = $this->event['data']['details']['currency_code'];
+        $amount = $amount / pow(10, Am_Currency::$currencyList[$currency]['precision']);
+
+        // Convert back to the invoice currency exchange rate
+        $xrate = $this->invoice->data()->get(Am_Paysystem_PaddleBilling::INV_XRATE) ?? 1;
+        $amount = $amount / $xrate;
+
+        return Am_Currency::moneyRound($amount, $currency);
+    }
+
     public function validateStatus()
     {
         // Make sure this is a billing transaction, not a card update etc
         // @see: https://developer.paddle.com/api-reference/transactions/overview
+        // Allow core charging events - can be free (trial)
         if (in_array($this->event['data']['origin'], [
             'api', 'web', 'subscription_recurring', 'subscription_charge',
         ])) {
+            return true;
+        }
+
+        // Subscription updates only if they are a charge (not a credit)
+        if ('subscription_update' == $this->event['data']['origin']
+            && $this->event['data']['details']['totals']['total'] > 0) {
             return true;
         }
 
@@ -1212,15 +1254,18 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
 
         // Set the local/invoice exchange rate for localized payments
         // The conversion is fixed for life of the subscription, so we can just
-        // calculate it and use it later in case of refunds
+        // calculate it once on first payment and use it later in case of refunds
         $amount = $this->event['data']['details']['totals']['total'];
         $currency = $this->event['data']['details']['totals']['currency_code'];
-        $amount = $amount / pow(10, Am_Currency::$currencyList[$currency]['precision']);
-        $isFirst = ! ((doubleval($this->invoice->first_total) === 0.0) || $this->invoice->getPaymentsCount());
-        $inv_amt = $isFirst ? $this->invoice->first_total : $this->invoice->second_total;
-        if ($inv_amt > 0 && $inv_amt != $amount) {
-            $xrate = $amount / $inv_amt;
-            $this->invoice->data()->set(Am_Paysystem_PaddleBilling::INV_XRATE, $xrate)->update();
+        $xrate = $this->invoice->data()->get(Am_Paysystem_PaddleBilling::INV_XRATE);
+        if ($amount > 0 && !$xrate && $this->invoice->currency != $currency) {
+            $isFirst = !((0.0 === doubleval($this->invoice->first_total)) || $this->invoice->getPaymentsCount());
+            $inv_amt = $isFirst ? $this->invoice->first_total : $this->invoice->second_total;
+            // Calc and save xrate
+            if ($inv_amt > 0) {
+                $xrate = $amount / $inv_amt;
+                $this->invoice->data()->set(Am_Paysystem_PaddleBilling::INV_XRATE, $xrate)->update();
+            }
         }
 
         // Backfill user details, as customer may have added extra
@@ -1348,7 +1393,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
 
                 break;
 
-            case 'subscription.cancelled':
+            case 'subscription.canceled':
                 $this->invoice->setCancelled(true);
         }
     }
