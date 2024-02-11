@@ -259,8 +259,12 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             $sptext = ': '.$this->getRebillText($item->rebill_times);
 
             // Try get product specific image, fall back to default if needed
-            $image_url = $item->tryLoadProduct()->img_cart_path ?? $default_img;
-            $image_url = $this->getDi()->url($image_url, null, false, true);
+            if ($image_url = $item->tryLoadProduct()->img_cart_path) {
+                $image_url = $this->getDi()->url('data/public/'.$image_url, null, false, true);
+            } else {
+                $image_url = $default_img;
+            }
+
             $terms = $item->tryLoadProduct()->getBillingPlan()->getTerms();
 
             // Build the core transaction item payload
