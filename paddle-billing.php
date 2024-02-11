@@ -1109,12 +1109,18 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
     {
         // Convert back to decimal: eg: USD 100 => USD 1.00
         $amount = $this->event['data']['details']['totals']['total'];
-        $currency = $this->event['data']['details']['currency_code'];
-        $amount = $amount / pow(10, Am_Currency::$currencyList[$currency]['precision']);
+        $currency = $this->event['data']['details']['totals']['currency_code'];
+        $amount /= pow(10, Am_Currency::$currencyList[$currency]['precision']);
+        $local = $amount;
 
         // Convert back to the invoice currency exchange rate
-        $xrate = $this->invoice->data()->get(Am_Paysystem_PaddleBilling::INV_XRATE) ?? 1;
-        $amount = $amount / $xrate;
+        $xrate = $this->invoice->data()->get(Am_Paysystem_PaddleBilling::INV_XRATE);
+        if ($xrate && $currency != $this->invoice->currency) {
+            $amount /= $xrate;
+            $this->log->add(
+                "Amount: {$currency} {$local} converted using {$currency}/{$this->invoice->currency} xrate: {$xrate} = {$this->invoice->currency} {$amount}"
+            );
+        }
 
         return Am_Currency::moneyRound($amount, $currency);
     }
@@ -1255,7 +1261,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
         // Set the local/invoice exchange rate for localized payments
         // The conversion is fixed for life of the subscription, so we can just
         // calculate it once on first payment and use it later in case of refunds
-        $amount = $this->event['data']['details']['totals']['total'];
+        $amount = $this->getAmount();
         $currency = $this->event['data']['details']['totals']['currency_code'];
         $xrate = $this->invoice->data()->get(Am_Paysystem_PaddleBilling::INV_XRATE);
         if ($amount > 0 && !$xrate && $this->invoice->currency != $currency) {
@@ -1429,11 +1435,17 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
         // Convert back to decimal: eg: USD 100 => USD 1.00
         $amount = $this->event['data']['totals']['total'];
         $currency = $this->event['data']['totals']['currency_code'];
-        $amount = $amount / pow(10, Am_Currency::$currencyList[$currency]['precision']);
+        $amount /= pow(10, Am_Currency::$currencyList[$currency]['precision']);
+        $local = $amount;
 
         // Convert back to the invoice currency exchange rate
-        $xrate = $this->invoice->data()->get(Am_Paysystem_PaddleBilling::INV_XRATE) ?? 1;
-        $amount = $amount / $xrate;
+        $xrate = $this->invoice->data()->get(Am_Paysystem_PaddleBilling::INV_XRATE);
+        if ($xrate && $currency != $this->invoice->currency) {
+            $amount /= $xrate;
+            $this->log->add(
+                "Amount: {$currency} {$local} converted using {$currency}/{$this->invoice->currency} xrate: {$xrate} = {$this->invoice->currency} {$amount}"
+            );
+        }
 
         return Am_Currency::moneyRound($amount, $currency);
     }
