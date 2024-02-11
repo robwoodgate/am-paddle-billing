@@ -260,6 +260,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
             // Try get product specific image, fall back to default if needed
             $image_url = $item->tryLoadProduct()->img_cart_path ?? $default_img;
+            $image_url = $this->getDi()->url($image_url, null, false, true);
             $terms = $item->tryLoadProduct()->getBillingPlan()->getTerms();
 
             // Build the core transaction item payload
