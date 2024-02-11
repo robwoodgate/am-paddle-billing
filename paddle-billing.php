@@ -1148,7 +1148,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
 
     public function findInvoiceId()
     {
-        // Try decoding to get CUSTOM_DATA_INV field
+        // Try getting it by CUSTOM_DATA_INV field
         $cdata = $this->event['data']['custom_data'];
         $public_id = $cdata[Am_Paysystem_PaddleBilling::CUSTOM_DATA_INV] ?? null;
         if ($public_id) {
@@ -1344,16 +1344,25 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
 
     public function findInvoiceId()
     {
-        // Try decoding to get CUSTOM_DATA_INV field
+        // Try getting it by CUSTOM_DATA_INV field
         $cdata = $this->event['data']['custom_data'];
         $public_id = $cdata[Am_Paysystem_PaddleBilling::CUSTOM_DATA_INV] ?? null;
         if ($public_id) {
             return $public_id;
         }
 
+        // Try getting it by subscription ID
+        $invoice = Am_Di::getInstance()->invoiceTable->findFirstByData(
+            Am_Paysystem_PaddleBilling::SUBSCRIPTION_ID,
+            $this->getUniqId() // sub_id
+        );
+        if ($invoice) {
+            return $invoice->public_id;
+        }
+
         // Try getting it by receipt id
         $invoice = Am_Di::getInstance()->invoiceTable->findByReceiptIdAndPlugin(
-            $this->getReceiptId(),
+            $this->getReceiptId(), // txn_id
             $this->getPlugin()->getId()
         );
 
