@@ -1421,6 +1421,9 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
                 }
 
                 // Update rebill date if this was changed in Paddle subscription
+                // NB: Does not change access periods here, because we don't know
+                // why the date was changed - and all payment/cancellation cases
+                // are handled elsewhere, so leave it to be done manually
                 if ($rebill_date && $this->invoice->rebill_date != sqlDate($rebill_date)) {
                     $this->log->add('Set rebill date to: '.sqlDate($rebill_date));
                     $this->invoice->updateQuick('rebill_date', sqlDate($rebill_date));
