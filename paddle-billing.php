@@ -1261,10 +1261,12 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
         // Set the local/invoice exchange rate for localized payments
         // The conversion is fixed for life of the subscription, so we can just
         // calculate it once on first payment and use it later in case of refunds
-        $amount = $this->getAmount();
+        $amount = $this->event['data']['details']['totals']['total'];
         $currency = $this->event['data']['details']['totals']['currency_code'];
+        $amount /= pow(10, Am_Currency::$currencyList[$currency]['precision']);
         $xrate = $this->invoice->data()->get(Am_Paysystem_PaddleBilling::INV_XRATE);
-        if ($amount > 0 && !$xrate && $this->invoice->currency != $currency) {
+        if ($amount > 0 && !$xrate && $currency != $this->invoice->currency) {
+            // Get invoice total
             $isFirst = !((0.0 === doubleval($this->invoice->first_total)) || $this->invoice->getPaymentsCount());
             $inv_amt = $isFirst ? $this->invoice->first_total : $this->invoice->second_total;
             // Calc and save xrate
@@ -1478,7 +1480,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                     $this->invoice->invoice_id.'/'.$this->invoice->public_id
                 );
                 $this->getPlugin()->addUserNote($this->invoice->getUser(), $note);
-                $this->log->add('Added credit ' . $type . ' note for adjustment_id: '.$this->getUniqId());
+                $this->log->add('Added credit '.$type.' note for adjustment_id: '.$this->getUniqId());
 
                 break;
 
@@ -1494,7 +1496,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                             'invoice_id' => $this->invoice->invoice_id,
                         ]
                     );
-                    $this->log->add('Removed refund for transaction_id: '. $this->getReceiptId());
+                    $this->log->add('Removed refund for transaction_id: '.$this->getReceiptId());
 
                     return; // all done
                 }
@@ -1506,7 +1508,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                         $this->getReceiptId(),
                         $amount
                     );
-                    $this->log->add('Added refund for transaction_id: '. $this->getReceiptId());
+                    $this->log->add('Added refund for transaction_id: '.$this->getReceiptId());
                 } catch (Am_Exception_Db_NotUnique $e) {
                     // Refund already added
                 }
