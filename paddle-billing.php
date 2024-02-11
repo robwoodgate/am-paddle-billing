@@ -433,7 +433,11 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 window.addEventListener('paddleBillingEvent', function(e) {
                     displayTotals(e.detail.data);
                 });
-                function displayTotals({ currency_code, totals, recurring_totals }) {
+                function displayTotals(data) {
+                  let currency_code = data.currency_code;
+                  let totals = data.totals;
+                  let recurring_totals = data.recurring_totals;
+
                   // currency labels
                   for (var currencyLabel of currencyLabels) {
                     currencyLabel.innerHTML = currency_code + " ";
