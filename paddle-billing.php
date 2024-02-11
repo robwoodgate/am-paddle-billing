@@ -1404,9 +1404,13 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
                 // Vars
                 $status = $this->event['data']['status'];
                 $rebill_date = $this->event['data']['next_billed_at'];
+                $statii = [
+                    Invoice::RECURRING_ACTIVE => ['active', 'trialing'],
+                    Invoice::RECURRING_FAILED => ['paused', 'past_due'],
+                ];
 
                 // Update recurring status
-                if ($status != $this->invoice->status) {
+                if (!in_array($status, $statii[$this->invoice->status] ?? [])) {
                     $this->log->add('Subscription status changed, now: '.$status);
                 }
                 if (in_array($status, ['active', 'trialing'])) {
