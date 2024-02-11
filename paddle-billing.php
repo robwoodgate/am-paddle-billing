@@ -1271,6 +1271,9 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
             if ($inv_amt > 0) {
                 $xrate = $amount / $inv_amt;
                 $this->invoice->data()->set(Am_Paysystem_PaddleBilling::INV_XRATE, $xrate)->update();
+                $this->log->add(
+                    "Saved {$currency}/{$this->invoice->currency} xrate: {$xrate}"
+                );
             }
         }
 
@@ -1306,8 +1309,10 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
             && Invoice::PENDING == $this->invoice->status
         ) {
             $this->invoice->addAccessPeriod($this);
+            $this->log->add('Added free access for transaction_id: '.$this->getUniqId());
         } else {
             $this->invoice->addPayment($this);
+            $this->log->add('Added payment for transaction_id: '.$this->getUniqId());
         }
 
         // Paddle subscriptions continue indefinitely, so we need to
@@ -1461,10 +1466,11 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
         switch ($this->event['data']['action']) {
             case 'credit_reverse':
             case 'credit':
+                $type = ('credit' == $this->event['data']['action'])
+                        ? ___('issued') : ___('reversed');
                 $note = ___(
                     'Paddle %1$s a credit of %2$s for invoice #%3$s.',
-                    'credit' == $this->event['data']['action']
-                        ? ___('issued') : ___('reversed'),
+                    $type,
                     Am_Currency::render(
                         $this->getAmount(),
                         $this->event['data']['totals']['currency_code']
@@ -1472,6 +1478,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                     $this->invoice->invoice_id.'/'.$this->invoice->public_id
                 );
                 $this->getPlugin()->addUserNote($this->invoice->getUser(), $note);
+                $this->log->add('Added credit ' . $type . ' note for adjustment_id: '.$this->getUniqId());
 
                 break;
 
@@ -1482,21 +1489,24 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                 if ('rejected' == $this->event['data']['status']) {
                     $this->getPlugin()->getDi()->invoiceRefundTable->deleteBy(
                         [
-                            'transaction_id' => $this->getReceiptId(),
-                            'receipt_id' => $this->getUniqId(),
+                            'transaction_id' => $this->getReceiptId(), // txn_id
+                            'receipt_id' => $this->getUniqId(), // adj_id
                             'invoice_id' => $this->invoice->invoice_id,
                         ]
                     );
+                    $this->log->add('Removed refund for transaction_id: '. $this->getReceiptId());
 
                     return; // all done
                 }
 
                 try {
+                    $amount = $this->getAmount();
                     $this->invoice->addRefund(
                         $this,
                         $this->getReceiptId(),
-                        $this->getAmount()
+                        $amount
                     );
+                    $this->log->add('Added refund for transaction_id: '. $this->getReceiptId());
                 } catch (Am_Exception_Db_NotUnique $e) {
                     // Refund already added
                 }
@@ -1517,8 +1527,10 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                     $this->invoice->getUser(),
                     $note
                 );
+                $this->log->add('Added chargeback user note');
                 if ($user) {
                     $user->lock(true);
+                    $this->log->add('Locked user account');
                 }
 
                 break;
@@ -1533,7 +1545,9 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                     $this->invoice->getUser(),
                     $note
                 );
+                $this->log->add('Added chargeback warning user note');
                 if ($user) {
+                    $this->log->add('Locked user account');
                     $user->lock(true);
                 }
 
@@ -1546,7 +1560,9 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                     $this->invoice->getUser(),
                     $note
                 );
+                $this->log->add('Added chargeback reversed user note');
                 if ($user) {
+                    $this->log->add('Unlocked user account');
                     $user->lock(false);
                 }
         }
