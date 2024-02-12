@@ -472,7 +472,9 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         if ('pay' == $request->getActionName()) {
             $ptxn = $request->getParam('_ptxn');
             $view = $this->getDi()->view;
-            $view->content = $this->paddleJsSetupCode();
+            $mem_url = $this->getDi()->surl('login');
+            $msg = ___("Enjoy your membership. Please click %shere%s to access your member's area.", '<a href="'.$mem_url.'">', '</a>');
+            $view->content = $this->paddleJsSetupCode().'<div style="display:flex;align-items: center;justify-content:center;height:100%;max-width:800px;margin:0 auto;text-align:center;padding:2em;"><strong style="font-size:20px;font-weight:bold">'.$msg.'</strong></div>';
             $view->display('layout-blank.phtml');
 
             return;
@@ -1351,7 +1353,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
                 true
             );
             $note = ___(
-                "A Paddle Billing subscription update was received:\n\nAmount: %s\naMember invoice #%s.\nTransaction ID: #%s\nPaddle Invoice: #%s\n\nPDF Invoice:%s",
+                "A Paddle Billing subscription update was received:\n\nAmount: %s\naMember invoice #%s.\nTransaction ID: #%s\nPaddle Invoice: #%s\n\nPDF Invoice: %s",
                 Am_Currency::render(
                     $this->getAmount(),
                     $this->event['data']['totals']['currency_code']
