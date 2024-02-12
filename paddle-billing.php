@@ -649,25 +649,29 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     /**
      * Convenience method to add a user note.
      *
-     * @param string $email   User Email
-     * @param string $content The note content
+     * @param Am_Record|string $user    aMember user or email
+     * @param string           $content The note content
      *
      * @return null|Am_Record The aMember user or null
      */
-    public function addUserNote($email, $content)
+    public function addUserNote($user, $content)
     {
-        $user = $this->getDi()->userTable->findFirstByEmail($email);
-        if ($user) {
-            $note = $this->getDi()->userNoteRecord;
-            $note->user_id = $user->user_id;
-            $note->dattm = $this->getDi()->sqlDateTime;
-            $note->content = $content;
-            $note->insert();
-
-            return $user;
+        // Lookup user by email if needed
+        if (!$user instanceof Am_Record) {
+            $user = $this->getDi()->userTable->findFirstByEmail($user);
+            if (!$user) {
+                return null; // user not found
+            }
         }
 
-        return null;
+        // Build and insert note
+        $note = $this->getDi()->userNoteRecord;
+        $note->user_id = $user->user_id;
+        $note->dattm = $this->getDi()->sqlDateTime;
+        $note->content = $content;
+        $note->insert();
+
+        return $user;
     }
 
     public function getReadme()
@@ -1173,18 +1177,12 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
         // @see: https://developer.paddle.com/api-reference/transactions/overview
         // Allow core charging events - can be free (trial)
         if (in_array($this->event['data']['origin'], [
-            'api', 'web', 'subscription_recurring', 'subscription_charge',
+            'api', 'web', 'subscription_recurring', 'subscription_charge', 'subscription_update',
         ])) {
             return true;
         }
 
-        // Subscription updates only if they are a charge (not a credit)
-        if ('subscription_update' == $this->event['data']['origin']
-            && $this->event['data']['details']['totals']['total'] > 0) {
-            return true;
-        }
-
-        // Ignore: subscription_payment_method_change, subscription_update
+        // Ignore: subscription_payment_method_change, and anything else!
         return false;
     }
 
@@ -1338,13 +1336,41 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
         );
         $user->update(); // commit
 
-        // Add payment / access
-        if (0 == (float) $this->invoice->first_total
+        // Process payment / access...
+        if ('subscription_update' == $this->event['data']['origin']) {
+            // We can't reflect subscription updates in aMember, as they would
+            // mess with the expected payment count, so just add a user note to
+            // log it and link to the receipt in case it is needed later.
+            $pdf_url = $this->getPlugin()->getDi()->url(
+                'payment/'.$this->getPlugin()->getId().'/invoice',
+                [
+                    'id' => $this->invoice->getSecureId($this->getPlugin()->getId()),
+                    'txn' => $this->getUniqId(),
+                ],
+                false,
+                true
+            );
+            $note = ___(
+                "A Paddle Billing subscription update was received:\n\nAmount: %s\naMember invoice #%s.\nTransaction ID: #%s\nPaddle Invoice: #%s\n\nPDF Invoice:%s",
+                Am_Currency::render(
+                    $this->getAmount(),
+                    $this->event['data']['totals']['currency_code']
+                ),
+                $this->invoice->invoice_id.'/'.$this->invoice->public_id,
+                $this->getUniqId(),
+                $this->event['data']['invoice_number'],
+                $pdf_url,
+            );
+            $this->getPlugin()->addUserNote($this->invoice->getUser(), $note);
+            $this->log->add('Subscription updated - added user note for transaction_id: '.$this->getUniqId());
+        } elseif (0 == (float) $this->invoice->first_total
             && Invoice::PENDING == $this->invoice->status
         ) {
+            // Add access for free first period
             $this->invoice->addAccessPeriod($this);
             $this->log->add('Added free access for transaction_id: '.$this->getUniqId());
         } else {
+            // Add payment for next paid period
             $this->invoice->addPayment($this);
             $this->log->add('Added payment for transaction_id: '.$this->getUniqId());
         }
@@ -1430,26 +1456,12 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
                     $this->invoice->setStatus(Invoice::RECURRING_FAILED); // self-checks
                 }
 
-                // Update rebill date if this was changed in Paddle subscription
-                // NB: Does not change access periods here, because we don't know
-                // why the date was changed - and all payment/cancellation cases
-                // are handled elsewhere, so leave it to be done manually
+                // Sync rebill date and access with Paddle's rebill date
                 if ($rebill_date && $this->invoice->rebill_date != sqlDate($rebill_date)) {
-                    $this->log->add('Set rebill date to: '.sqlDate($rebill_date));
-                    $this->invoice->updateQuick('rebill_date', sqlDate($rebill_date));
-                }
-
-                // Extend access for past due invoices while they are in dunning
-                // If dunning fails, status will change to paused or canceled
-                if ('past_due' == $status && $this->invoice->getAccessExpire() < $this->invoice->rebill_date) {
-                    $this->invoice->extendAccessPeriod($this->invoice->rebill_date);
-                    $this->log->add(
-                        sprintf(
-                            'Invoice #%1$s - access extended while in dunning: %2$s',
-                            $this->invoice->pk().'/'.$this->invoice->public_id,
-                            $this->invoice->rebill_date
-                        )
-                    );
+                    $rebill_date = sqlDate($rebill_date); // do it once
+                    $this->invoice->extendAccessPeriod($rebill_date);
+                    $this->invoice->updateQuick('rebill_date', $rebill_date);
+                    $this->log->add('Set rebill date and extended access to: '.$rebill_date);
                 }
 
                 break;
@@ -1516,6 +1528,8 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
         switch ($this->event['data']['action']) {
             case 'credit_reverse':
             case 'credit':
+                // We can't reflect these in the aMember invoice, so just
+                // add a user note to log it
                 $type = ('credit' == $this->event['data']['action'])
                         ? ___('issued') : ___('reversed');
                 $note = ___(
