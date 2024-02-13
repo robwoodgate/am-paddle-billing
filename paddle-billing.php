@@ -74,13 +74,18 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         }
     }
 
+    // NB: This hook ONLY fires on pages where payment systems are loaded
+    // such as signup forms, payment history page, and directAction pages
+    // If a CC module plugin is enabled, also on member home page
     public function onBeforeRender(Am_Event $e): void
     {
-        // Add PaddleJS to member home/signup forms
+        // Add PaddleJS
         if (!defined('AM_ADMIN')) {
             static $init = 0;
             if (!$init++) {
-                $e->getView()->placeholder('head-start')->prepend('<script id="paddle-billing-js" src="'.static::PADDLEJS_URL.'"></script>'.$this->paddleJsSetupCode());
+                $hs = $e->getView()->headScript();
+                $hs->appendFile(static::PADDLEJS_URL);
+                $hs->appendScript($this->paddleJsSetupCode());
             }
         }
 
@@ -476,7 +481,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             $view = $this->getDi()->view;
             $mem_url = $this->getDi()->surl('login');
             $msg = ___("Enjoy your membership. Please click %shere%s to access your member's area.", '<a href="'.$mem_url.'">', '</a>');
-            $view->content = $this->paddleJsSetupCode().'<div style="display:flex;align-items: center;justify-content:center;height:100%;max-width:800px;margin:0 auto;text-align:center;padding:2em;"><strong style="font-size:20px;font-weight:bold">'.$msg.'</strong></div>';
+            $view->content = '<div style="display:flex;align-items: center;justify-content:center;height:100%;max-width:800px;margin:0 auto;text-align:center;padding:2em;"><strong style="font-size:20px;font-weight:bold">'.$msg.'</strong></div>';
             $view->display('layout-blank.phtml');
 
             return;
@@ -682,15 +687,14 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     {
         $version = self::PLUGIN_REVISION;
         $whk_url = $this->getPluginUrl('ipn');
-        $mem_url = $this->getDi()->url('member', null, false, true);
-        $dsu_url = $this->getDi()->url('signup', null, false, true);
         $pay_url = $this->getPluginUrl('pay');
+        $paddleJs = $this->paddleJsSetupCode(true);
 
         return <<<README
             <strong>Paddle Billing Plugin v{$version}</strong>
             Paddle Billing is the evolution of Paddle Classic, and is the default billing API for Paddle accounts created after August 8th, 2023.
 
-            If you signed up for Paddle before this date, <a href="https://developer.paddle.com/changelog/2023/enable-paddle-billing">you need to opt-in</a> to Paddle Billing. After you opt in, you can toggle between Paddle Billing and Paddle Classic.
+            If you signed up for Paddle before this date, <a href="https://developer.paddle.com/changelog/2023/enable-paddle-billing">you need to opt-in</a> to Paddle Billing. After you opt in, you can toggle between Paddle Billing and Paddle Classic, and run the two side by side for as long as you need.
 
             <strong>Instructions</strong>
 
@@ -698,7 +702,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
             2. Enable the plugin at <strong>aMember Admin -&gt; Setup/Configuration -&gt; Plugins</strong>
 
-            3. Configure the plugin at <strong>aMember Admin -&gt; Setup/Configuration -&gt; Paddle Billing</strong>
+            3. Configure the plugin at <strong>aMember Admin -&gt; Setup/Configuration -&gt; Paddle Billing.</strong>
 
             4. In the Developer > <a href="https://vendors.paddle.com/notifications">Notifications</a> menu of your Paddle account, set the following webhook endpoint to listen for these webhook events:
 
@@ -712,18 +716,16 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
             You will then need to copy Paddle's secret key for this webhook back to your plugin settings to complete configuration.
 
-            5. In the Checkout > <a href='https://vendors.paddle.com/checkout-settings'>Checkout Settings</a> menu of your Paddle account, set the Default Payment Link to one of the following as suits your needs:
+            5. In the Checkout > <a href='https://vendors.paddle.com/checkout-settings'>Checkout Settings</a> menu of your Paddle account, set the Default Payment Link to:
 
-            Member Home: <input type="text" value="{$mem_url}" size="50" onclick="this.select();"></input>
-            NOTE: Requires users to login to aMember first
+            <input type="text" value="{$pay_url}" size="50" onclick="this.select();"></input>
 
-            Default Signup Form: <input type="text" value="{$dsu_url}" size="50" onclick="this.select();"></input>
-            NOTE: Does not work if default signup redirects to cart
+            This link is used when customers update their payment details, and for payment links generated from within Paddle.
 
-            Default Checkout: <input type="text" value="{$pay_url}" size="50" onclick="this.select();"></input>
-            NOTE: Always available
+            <strong>OPTIONAL:</strong>
+            If you are using Paddle Retain, you can optionally insert the following snippet on all your website pages to show retry payment forms for customers in dunning, and card update reminders.
 
-            This link is used to pop up an overlay checkout when customers update their payment details, and for payment links generated from within Paddle.
+            <textarea onclick="this.select();" style="width:100%;" rows="7">{$paddleJs}</textarea>
 
             -------------------------------------------------------------------------------
 
@@ -989,7 +991,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         }
     }
 
-    protected function paddleJsSetupCode()
+    protected function paddleJsSetupCode($snippet=false)
     {
         $environment = $this->isSandbox() ? 'Paddle.Environment.set("sandbox");' : '';
         $client_token = $this->getConfig('client_token');
@@ -998,8 +1000,24 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $user = $this->getDi()->auth->getUser();
         $email = ($user instanceof User) ? 'email: "'.$user->email.'"' : '';
 
-        return <<<CUT
+        // Snippet for website only
+        if ($snippet) {
+            if ($this->isSandbox() || !$client_token || !$retain_key) {
+                return 'Set a LIVE Client-Side Token and your Retain Public Token to access this feature';
+            }
+
+            return <<<CUT
             <script>
+                Paddle.Setup({
+                    token: "{$client_token}",
+                    pwAuth: {$retain_key},
+                    pwCustomer: {},
+                });
+            </script>
+            CUT;
+        }
+
+        return <<<CUT
                 {$environment}
                 Paddle.Setup({
                     token: "{$client_token}",
@@ -1023,7 +1041,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                         document.dispatchEvent(evt);
                     }
                 });
-            </script>
             CUT;
     }
 }
