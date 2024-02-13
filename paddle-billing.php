@@ -723,7 +723,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             This link is used when customers update their payment details, and for payment links generated from within Paddle.
 
             <strong>OPTIONAL RETAIN SNIPPET:</strong>
-            If you are using Paddle Retain, you can optionally insert the following snippet on all your website pages to show retry payment forms for customers in dunning, and card update reminders. If aMember uses your WordPress template, you may need to check the "Exclude Paddle.js Script" option above.
+            If you are using Paddle Retain, you can optionally insert the following snippet on your website pages to show retry payment forms for customers in dunning, and card update reminders.
 
             <textarea onclick="this.select();" style="width:100%;" rows="8">{$paddleJs}</textarea>
 
