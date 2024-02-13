@@ -84,7 +84,9 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             static $init = 0;
             if (!$init++) {
                 $hs = $e->getView()->headScript();
-                $hs->appendFile(static::PADDLEJS_URL);
+                if (!$this->getConfig('no_paddlejs')) {
+                    $hs->appendFile(static::PADDLEJS_URL);
+                }
                 $hs->appendScript($this->paddleJsSetupCode());
             }
         }
@@ -174,6 +176,9 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
         // Add Extra fields
         $fs = $this->getExtraSettingsFieldSet($form);
+        $fs->addAdvCheckbox('no_paddlejs')
+            ->setLabel(['Exclude Paddle.js Script', 'Enable this if you already load the Paddle.js script via your template (eg: optional Retain Snippet below)'])
+        ;
         $fs->addAdvCheckbox('allow_localize')->setLabel('Allow Currency Localization
         If checked, will allow payment in the user\'s local currency. Leave disabled to force payment in the invoice currency.');
 
@@ -722,8 +727,8 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
             This link is used when customers update their payment details, and for payment links generated from within Paddle.
 
-            <strong>OPTIONAL:</strong>
-            If you are using Paddle Retain, you can optionally insert the following snippet on all your website pages to show retry payment forms for customers in dunning, and card update reminders.
+            <strong>OPTIONAL RETAIN SNIPPET:</strong>
+            If you are using Paddle Retain, you can optionally insert the following snippet on all your website pages to show retry payment forms for customers in dunning, and card update reminders. If aMember uses your WordPress template, you may need to check the "Exclude Paddle.js Script" option above.
 
             <textarea onclick="this.select();" style="width:100%;" rows="7">{$paddleJs}</textarea>
 
@@ -991,7 +996,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         }
     }
 
-    protected function paddleJsSetupCode($snippet=false)
+    protected function paddleJsSetupCode($snippet = false)
     {
         $environment = $this->isSandbox() ? 'Paddle.Environment.set("sandbox");' : '';
         $client_token = $this->getConfig('client_token');
@@ -1007,15 +1012,15 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             }
 
             return <<<CUT
-            <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
-            <script>
-                Paddle.Setup({
-                    token: "{$client_token}",
-                    pwAuth: {$retain_key},
-                    pwCustomer: {},
-                });
-            </script>
-            CUT;
+                <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
+                <script>
+                    Paddle.Setup({
+                        token: "{$client_token}",
+                        pwAuth: {$retain_key},
+                        pwCustomer: {},
+                    });
+                </script>
+                CUT;
         }
 
         return <<<CUT
