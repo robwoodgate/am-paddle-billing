@@ -84,9 +84,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             static $init = 0;
             if (!$init++) {
                 $hs = $e->getView()->headScript();
-                if (!$this->getConfig('no_paddlejs')) {
-                    $hs->appendFile(static::PADDLEJS_URL);
-                }
+                $hs->appendFile(static::PADDLEJS_URL);
                 $hs->appendScript($this->paddleJsSetupCode());
             }
         }
@@ -176,9 +174,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
         // Add Extra fields
         $fs = $this->getExtraSettingsFieldSet($form);
-        $fs->addAdvCheckbox('no_paddlejs')
-            ->setLabel(['Exclude Paddle.js Script', 'Enable this if you already load the Paddle.js script via your template (eg: optional Retain Snippet below)'])
-        ;
         $fs->addAdvCheckbox('allow_localize')->setLabel('Allow Currency Localization
         If checked, will allow payment in the user\'s local currency. Leave disabled to force payment in the invoice currency.');
 
