@@ -1007,6 +1007,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             }
 
             return <<<CUT
+            <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
             <script>
                 Paddle.Setup({
                     token: "{$client_token}",
