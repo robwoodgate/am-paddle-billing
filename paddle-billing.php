@@ -1269,7 +1269,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
             'name_l' => (string) $name_l,
             'country' => $body['data']['address']['country_code'],
             'zip' => $body['data']['address']['postal_code'],
-            'tax_id' => $body['data']['business']['tax_identifier'],
+            'tax_id' => $body['data']['business']['tax_identifier'] ?? null, // optional
         ];
     }
 
