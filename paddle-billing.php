@@ -154,17 +154,17 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             ->addRule('required')
         ;
 
-        $form->addSecretText('client_token', ['class' => 'am-el-wide'])
+        $form->addText('client_token', ['class' => 'am-el-wide'])
             ->setLabel("Client-Side Token\n".'From the Developer Tools > <a href="https://vendors.paddle.com/authentication-v2" target="_blank">Authentication menu</a> of your Paddle Dashboard.')
             ->addRule('required')
         ;
 
-        $form->addSecretText('secret_key', ['class' => 'am-el-wide'])
+        $form->addText('secret_key', ['class' => 'am-el-wide'])
             ->setLabel("Webhook Secret Key\n".'From the Developer Tools > <a href="https://vendors.paddle.com/notifications" target="_blank">Notifications menu</a> of your Paddle Dashboard. <a href="https://developer.paddle.com/webhooks/signature-verification#get-secret-key" target="_blank">Detailed Instructions</a>')
             ->addRule('required')
         ;
 
-        $form->addSecretText('retain_key', ['class' => 'am-el-wide'])
+        $form->addText('retain_key', ['class' => 'am-el-wide'])
             ->setLabel("Retain Public Token (Optional)\n".'From the Retain > Account Settings > <a href="https://www2.profitwell.com/app/account/integrations" target="_blank">Integrations</a> > API keys/Dev Kit of your Paddle Dashboard.')
         ;
 
