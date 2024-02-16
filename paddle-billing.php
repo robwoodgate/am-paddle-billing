@@ -1017,7 +1017,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
         // Snippet for website only
         if ($snippet) {
-            if ($this->isSandbox() || !$client_token || !$retain_key) {
+            if ($this->isSandbox() || !$client_token || 'null' == $retain_key) {
                 return 'Set a LIVE Client-Side Token and your Retain Public Token to access this feature';
             }
 
