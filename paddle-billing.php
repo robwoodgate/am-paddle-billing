@@ -9,6 +9,7 @@
  * ============================================================================
  * Revision History:
  * ----------------
+ * 2024-02-16   v1.1    R Woodgate  Work around for Paddle non-catalog item bug
  * 2024-01-31   v1.0    R Woodgate  Plugin Created
  * ============================================================================.
  *
@@ -17,7 +18,7 @@
 class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
-    public const PLUGIN_REVISION = '1.0';
+    public const PLUGIN_REVISION = '1.1';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
@@ -371,6 +372,20 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $body = @json_decode($resp->getBody(), true);
         if (empty($body['data']['id'])) {
             throw new Am_Exception_InternalError('Bad response: '.$resp->getBody());
+        }
+
+        // Make sure Paddle returned the products with "custom" type
+        // This might just be a temporary bug in some accounts...
+        // but we don't want to pollute the product catalog!
+        foreach ($body['data']['details']['line_items'] as $txnitm) {
+            if ('custom' != $txnitm['product']['type']) {
+                $this->_sendRequest(
+                    'products/'.$txnitm['product']['id'],
+                    ['type' => 'custom'],
+                    'FIX PRODUCT TYPE',
+                    'PATCH'
+                );
+            }
         }
 
         // Open pay page
