@@ -53,7 +53,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             new Am_CustomFieldSelect(
                 static::TAX_CATEGORY,
                 'Paddle Billing: Tax Category',
-                'Selected tax category MUST be enabled on your Paddle account.',
+                'Optional. Selected category MUST be enabled on your Paddle account (Default: standard).',
                 null,
                 ['empty_title' => 'Use Plugin Default', 'options' => array_combine($this->taxCategories, $this->taxCategories)]
             )
