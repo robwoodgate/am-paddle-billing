@@ -9,6 +9,7 @@
  * ============================================================================
  * Revision History:
  * ----------------
+ * 2024-02-17   v1.2    R Woodgate  Added tax mode/category selectors
  * 2024-02-16   v1.1    R Woodgate  Work around for Paddle non-catalog item bug
  * 2024-01-31   v1.0    R Woodgate  Plugin Created
  * ============================================================================.
@@ -18,7 +19,7 @@
 class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
-    public const PLUGIN_REVISION = '1.1';
+    public const PLUGIN_REVISION = '1.2';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
@@ -27,6 +28,8 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     public const CUSTOMER_ID = 'paddle-billing_ctm_id';
     public const INV_XRATE = 'paddle-billing_xrate';
     public const TXNITM = 'paddle-billing_txnitm';
+    public const TAX_CATEGORY = 'paddle-billing_tax_cat';
+    public const TAX_MODE = 'paddle-billing_tax_mode';
     public const LIVE_URL = 'https://api.paddle.com/';
     public const SANDBOX_URL = 'https://sandbox-api.paddle.com/';
     public const PADDLEJS_URL = 'https://cdn.paddle.com/paddle/v2/paddle.js';
@@ -35,9 +38,26 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     protected $defaultTitle = 'Paddle Billing';
     protected $defaultDescription = 'Payment via Paddle Billing gateway';
     protected $_canAutoCreate = true;
+    private $taxCategories = [
+        'standard', 'digital-goods', 'ebooks', 'implementation-services', 'professional-services', 'saas', 'software-programming-services', 'training-services', 'website-hosting',
+    ];
+    private $taxModes = [
+        'account_setting' => 'Use Paddle account setting',
+        'internal' => 'Prices INCLUDE tax',
+        'external' => 'Add Tax to Prices'
+    ];
 
     public function init(): void
     {
+        $this->getDi()->productTable->customFields()->add(
+            new Am_CustomFieldSelect(
+                static::TAX_CATEGORY,
+                'Paddle Billing: Tax Category',
+                'Selected tax category MUST be enabled on your Paddle account.',
+                null,
+                ['empty_title' => 'Use Plugin Default', 'options' => array_combine($this->taxCategories, $this->taxCategories)]
+            )
+        );
         $this->getDi()->billingPlanTable->customFields()->add(
             new Am_CustomFieldText(
                 static::PRICE_ID,
@@ -45,6 +65,15 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 'Optional. Lets you link and use Paddle Catalog items you have created. Only required if you <a href="'.$this->getDi()->url('admin-setup/paddle-billing#auto_create-0').'">accept direct payments</a>.',
                 null,
                 ['placeholder' => 'pri_abc123', 'size' => 32]
+            )
+        );
+        $this->getDi()->billingPlanTable->customFields()->add(
+            new Am_CustomFieldSelect(
+                static::TAX_MODE,
+                'Paddle Billing: Tax Mode',
+                'Optional. How tax is calculated for this billing plan.',
+                null,
+                ['empty_title' => 'Use Plugin Default', 'options' => $this->taxModes]
             )
         );
         $this->getDi()->blocks->add(
@@ -175,6 +204,20 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
         // Add Extra fields
         $fs = $this->getExtraSettingsFieldSet($form);
+        $fs->addSelect(static::TAX_CATEGORY)
+            ->setLabel('Default Tax Category'."\n".
+                'Optional. Selected category MUST be enabled on your Paddle account (Default: standard). <a href="https://www.paddle.com/help/start/intro-to-paddle/why-do-i-need-to-select-\'taxable-categories\'-for-my-products" target="_blank">Learn more</a>', )
+            ->loadOptions(array_combine($this->taxCategories, $this->taxCategories))
+        ;
+        $form->setDefault(static::TAX_CATEGORY, 'standard');
+
+        $fs->addSelect(static::TAX_MODE)
+            ->setLabel('Default Tax Mode'."\n".
+                'Optional. Lets you override your Paddle Account <a href="https://vendors.paddle.com/tax">Sales Tax setting</a>.', )
+            ->loadOptions($this->taxModes)
+        ;
+        $form->setDefault(static::TAX_MODE, 'account_setting');
+
         $fs->addAdvCheckbox('allow_localize')->setLabel('Allow Currency Localization
         If checked, will allow payment in the user\'s local currency. Leave disabled to force payment in the invoice currency.');
 
@@ -265,21 +308,35 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             $rebill = null;
             $fptext = ': '.$this->getText($item->first_period);
             $sptext = ': '.$this->getRebillText($item->rebill_times);
+            $product = $item->tryLoadProduct();
+            if (!$product) {
+                continue; // should never happen, but...
+            }
+
+            // Get product tax category, fall back to plugin default
+            $tax_category = $product->data()->get(static::TAX_CATEGORY);
+            if (!$tax_category) {
+                $tax_category = $this->getConfig(static::TAX_CATEGORY, 'standard');
+            }
+
+            // Get product tax mode, fall back to plugin default
+            $tax_mode = $product->getBillingPlan()->data()->get(static::TAX_MODE);
+            if (!$tax_mode) {
+                $tax_mode = $this->getConfig(static::TAX_MODE, 'account_setting');
+            }
 
             // Try get product specific image, fall back to default if needed
-            if ($image_url = $item->tryLoadProduct()->img_cart_path) {
+            if ($image_url = $product->img_cart_path) {
                 $image_url = $this->getDi()->url('data/public/'.$image_url, null, false, true);
             } else {
                 $image_url = $default_img;
             }
 
-            $terms = $item->tryLoadProduct()->getBillingPlan()->getTerms();
-
             // Build the core transaction item payload
             $txnitm = [
                 'quantity' => $item->qty,
                 'price' => [
-                    'description' => $terms,
+                    'description' => $product->getBillingPlan()->getTerms(),
                     'name' => ___('Subscription').$sptext,
                     'billing_cycle' => [
                         'interval' => $this->getInterval($item->second_period),
@@ -289,7 +346,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                         'interval' => $this->getInterval($item->first_period),
                         'frequency' => $this->getFrequency($item->first_period),
                     ],
-                    'tax_mode' => 'account_setting',
+                    'tax_mode' => $tax_mode,
                     'unit_price' => [
                         'amount' => $this->getAmount(
                             $item->second_total,
@@ -308,7 +365,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                     'product' => [
                         'name' => $item->item_title,
                         'description' => $item->item_description,
-                        'tax_category' => 'standard',
+                        'tax_category' => $tax_category,
                         'image_url' => $image_url,
                     ],
                 ],
