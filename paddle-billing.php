@@ -221,7 +221,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $fs->addText('statement_desc')->setLabel("Statement Description\nThe Statement Description from your Paddle Dashboard > Checkout > <a href='https://vendors.paddle.com/checkout-settings'>Checkout Settings</a> page. Shown on the thanks page to help alert customer as to what will appear on their card statement.");
         $fs->addSelect(static::TAX_CATEGORY)
             ->setLabel('Default Tax Category'."\n".
-                'Optional. Category MUST be enabled on your Paddle account (Default: standard). <a href="https://www.paddle.com/help/start/intro-to-paddle/why-do-i-need-to-select-\'taxable-categories\'-for-my-products" target="_blank">Learn more</a>', )
+                'Optional. Category MUST be enabled <a href="https://vendors.paddle.com/taxable-categories">in your Paddle account</a> (Default: standard). <a href="https://www.paddle.com/help/start/intro-to-paddle/why-do-i-need-to-select-\'taxable-categories\'-for-my-products" target="_blank">Learn more</a>', )
             ->loadOptions(array_combine($this->taxCategories, $this->taxCategories))
         ;
         $form->setDefault(static::TAX_CATEGORY, 'standard');
