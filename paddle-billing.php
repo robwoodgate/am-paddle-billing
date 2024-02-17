@@ -53,7 +53,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             new Am_CustomFieldSelect(
                 static::TAX_CATEGORY,
                 'Paddle Billing: Tax Category',
-                'Optional. Selected category MUST be enabled on your Paddle account (Default: standard).',
+                'Optional. Category MUST be enabled on your Paddle account (Default: standard).',
                 null,
                 ['empty_title' => 'Use Plugin Default', 'options' => array_combine($this->taxCategories, $this->taxCategories)]
             )
@@ -206,7 +206,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $fs = $this->getExtraSettingsFieldSet($form);
         $fs->addSelect(static::TAX_CATEGORY)
             ->setLabel('Default Tax Category'."\n".
-                'Optional. Selected category MUST be enabled on your Paddle account (Default: standard). <a href="https://www.paddle.com/help/start/intro-to-paddle/why-do-i-need-to-select-\'taxable-categories\'-for-my-products" target="_blank">Learn more</a>', )
+                'Optional. Category MUST be enabled on your Paddle account (Default: standard). <a href="https://www.paddle.com/help/start/intro-to-paddle/why-do-i-need-to-select-\'taxable-categories\'-for-my-products" target="_blank">Learn more</a>', )
             ->loadOptions(array_combine($this->taxCategories, $this->taxCategories))
         ;
         $form->setDefault(static::TAX_CATEGORY, 'standard');
