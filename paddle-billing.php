@@ -44,7 +44,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     private $taxModes = [
         'account_setting' => 'Use Paddle account setting',
         'internal' => 'Prices INCLUDE tax',
-        'external' => 'Add Tax to Prices'
+        'external' => 'Add Tax to Prices',
     ];
 
     public function init(): void
@@ -218,7 +218,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             'class' => 'am-el-wide',
             'placeholder' => $this->getDi()->url('path/to/my_logo.png', null, false, true),
         ])->setLabel("Default Image URL\nAn absolute URL to a square image of your brand or product. Recommended minimum size is 128x128px. Supported image types are: .gif, .jpeg, and .png. Will be used for single payments where the optional Paddle Product ID is not supplied.");
-        $fs->addText('statement_desc')->setLabel("Statement Description\nThe Statement Description from your Paddle Dashboard > Checkout > <a href='https://vendors.paddle.com/checkout-settings'>Checkout Settings</a> page. Shown on the thanks page to help alert customer as to what will appear on their card statement.");
+        $fs->addText('statement_desc')->setLabel("Statement Description\nThe Statement Description from your Paddle Dashboard > Checkout > <a href='https://vendors.paddle.com/checkout-settings' target='_blank'>Checkout Settings</a> page. Shown on the thanks page to help alert customer as to what will appear on their card statement.");
         $fs->addSelect(static::TAX_CATEGORY)
             ->setLabel('Default Tax Category'."\n".
                 'Optional. Category <a href="https://vendors.paddle.com/taxable-categories" target="_blank">MUST be approved</a> in your Paddle account (Default: standard). <a href="https://www.paddle.com/help/start/intro-to-paddle/why-do-i-need-to-select-\'taxable-categories\'-for-my-products" target="_blank">Learn more</a>', )
@@ -228,7 +228,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
         $fs->addSelect(static::TAX_MODE)
             ->setLabel('Default Tax Mode'."\n".
-                'Optional. Lets you override your Paddle Account <a href="https://vendors.paddle.com/tax">Sales Tax setting</a>.', )
+                'Optional. Lets you override your Paddle Account <a href="https://vendors.paddle.com/tax" target="_blank">Sales Tax setting</a>.', )
             ->loadOptions($this->taxModes)
         ;
         $form->setDefault(static::TAX_MODE, 'account_setting');
@@ -765,7 +765,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             <strong>Paddle Billing Plugin v{$version}</strong>
             Paddle Billing is the evolution of Paddle Classic, and is the default billing API for Paddle accounts created after August 8th, 2023.
 
-            If you signed up for Paddle before this date, <a href="https://developer.paddle.com/changelog/2023/enable-paddle-billing">you need to opt-in</a> to Paddle Billing. After you opt in, you can toggle between Paddle Billing and Paddle Classic, and run the two side by side for as long as you need.
+            If you signed up for Paddle before this date, <a href="https://developer.paddle.com/changelog/2023/enable-paddle-billing" target="_blank">you need to opt-in</a> to Paddle Billing. After you opt in, you can toggle between Paddle Billing and Paddle Classic, and run the two side by side for as long as you need.
 
             <strong>Instructions</strong>
 
@@ -775,7 +775,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
             3. Configure the plugin at <strong>aMember Admin -&gt; Setup/Configuration -&gt; Paddle Billing.</strong>
 
-            4. In the Developer > <a href="https://vendors.paddle.com/notifications">Notifications</a> menu of your Paddle account, set the following webhook endpoint to listen for these webhook events:
+            4. In the Developer > <a href="https://vendors.paddle.com/notifications" target="_blank">Notifications</a> menu of your Paddle account, set the following webhook endpoint to listen for these webhook events:
 
             &bull; <code>transaction.completed</code>
             &bull; <code>subscription.canceled</code>
@@ -787,7 +787,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
             You will then need to copy Paddle's secret key for this webhook back to your plugin settings to complete configuration.
 
-            5. In the Checkout > <a href='https://vendors.paddle.com/checkout-settings'>Checkout Settings</a> menu of your Paddle account, set the Default Payment Link to:
+            5. In the Checkout > <a href='https://vendors.paddle.com/checkout-settings' target="_blank">Checkout Settings</a> menu of your Paddle account, set the Default Payment Link to:
 
             <input type="text" value="{$pay_url}" size="50" onclick="this.select();"></input>
 
