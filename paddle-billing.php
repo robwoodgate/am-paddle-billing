@@ -204,20 +204,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
         // Add Extra fields
         $fs = $this->getExtraSettingsFieldSet($form);
-        $fs->addSelect(static::TAX_CATEGORY)
-            ->setLabel('Default Tax Category'."\n".
-                'Optional. Category MUST be enabled on your Paddle account (Default: standard). <a href="https://www.paddle.com/help/start/intro-to-paddle/why-do-i-need-to-select-\'taxable-categories\'-for-my-products" target="_blank">Learn more</a>', )
-            ->loadOptions(array_combine($this->taxCategories, $this->taxCategories))
-        ;
-        $form->setDefault(static::TAX_CATEGORY, 'standard');
-
-        $fs->addSelect(static::TAX_MODE)
-            ->setLabel('Default Tax Mode'."\n".
-                'Optional. Lets you override your Paddle Account <a href="https://vendors.paddle.com/tax">Sales Tax setting</a>.', )
-            ->loadOptions($this->taxModes)
-        ;
-        $form->setDefault(static::TAX_MODE, 'account_setting');
-
         $fs->addAdvCheckbox('allow_localize')->setLabel('Allow Currency Localization
         If checked, will allow payment in the user\'s local currency. Leave disabled to force payment in the invoice currency.');
 
@@ -233,6 +219,19 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             'placeholder' => $this->getDi()->url('path/to/my_logo.png', null, false, true),
         ])->setLabel("Default Image URL\nAn absolute URL to a square image of your brand or product. Recommended minimum size is 128x128px. Supported image types are: .gif, .jpeg, and .png. Will be used for single payments where the optional Paddle Product ID is not supplied.");
         $fs->addText('statement_desc')->setLabel("Statement Description\nThe Statement Description from your Paddle Dashboard > Checkout > <a href='https://vendors.paddle.com/checkout-settings'>Checkout Settings</a> page. Shown on the thanks page to help alert customer as to what will appear on their card statement.");
+        $fs->addSelect(static::TAX_CATEGORY)
+            ->setLabel('Default Tax Category'."\n".
+                'Optional. Category MUST be enabled on your Paddle account (Default: standard). <a href="https://www.paddle.com/help/start/intro-to-paddle/why-do-i-need-to-select-\'taxable-categories\'-for-my-products" target="_blank">Learn more</a>', )
+            ->loadOptions(array_combine($this->taxCategories, $this->taxCategories))
+        ;
+        $form->setDefault(static::TAX_CATEGORY, 'standard');
+
+        $fs->addSelect(static::TAX_MODE)
+            ->setLabel('Default Tax Mode'."\n".
+                'Optional. Lets you override your Paddle Account <a href="https://vendors.paddle.com/tax">Sales Tax setting</a>.', )
+            ->loadOptions($this->taxModes)
+        ;
+        $form->setDefault(static::TAX_MODE, 'account_setting');
     }
 
     public function isConfigured()
