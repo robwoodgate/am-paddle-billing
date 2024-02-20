@@ -9,7 +9,7 @@
  * ============================================================================
  * Revision History:
  * ----------------
- * 2024-02-20   v1.3    R Woodgate  Refactor API call from fetchUserInfo()
+ * 2024-02-20   v1.3    R Woodgate  Refactor transaction API call
  * 2024-02-17   v1.2    R Woodgate  Added tax mode/category selectors
  * 2024-02-16   v1.1    R Woodgate  Work around for Paddle non-catalog item bug
  * 2024-01-31   v1.0    R Woodgate  Plugin Created
