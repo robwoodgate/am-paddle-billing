@@ -9,6 +9,7 @@
  * ============================================================================
  * Revision History:
  * ----------------
+ * 2024-02-20   v1.3    R Woodgate  Refactor API call from fetchUserInfo()
  * 2024-02-17   v1.2    R Woodgate  Added tax mode/category selectors
  * 2024-02-16   v1.1    R Woodgate  Work around for Paddle non-catalog item bug
  * 2024-01-31   v1.0    R Woodgate  Plugin Created
@@ -19,7 +20,7 @@
 class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
-    public const PLUGIN_REVISION = '1.2';
+    public const PLUGIN_REVISION = '1.3';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
@@ -814,13 +815,28 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
     }
 
     /**
+     * Securely gets transaction data from the Paddle API for transaction handling
+     * without making the entire API public.
+     *
+     * @see Am_Paysystem_PaddleBilling_Webhook_Transaction::fetchUserInfo()
+     *
+     * @param string       $txn_id  Paddle Transaction ID
+     * @param null|Invoice $invoice aMember invoice | null
+     *
+     * @return HTTP_Request2_Response The API Response
+     */
+    public function getTransaction($txn_id, ?Invoice $invoice = null)
+    {
+        return $this->_sendRequest('transactions/'.$txn_id.'?include=address,business,customer', null, 'GET TRANSACTION', Am_HttpRequest::METHOD_GET, $invoice);
+    }
+
+    /**
      * Convenience method to send authenticated Paddle API requests.
-     * NB: Public so Am_Paysystem_PaddleBilling_Webhook_Transaction can call it.
      *
      * @param mixed $url
      * @param mixed $method
      */
-    public function _sendRequest(
+    protected function _sendRequest(
         $url,
         ?array $params = null,
         ?string $logTitle = null,
@@ -1322,7 +1338,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
     {
         // Get the transaction again, this time with customer details included
         // It's faster than calling each API seperately!
-        $resp = $this->getPlugin()->_sendRequest('transactions/'.$this->getReceiptId().'?include=address,business,customer', null, 'GET TRANSACTION', Am_HttpRequest::METHOD_GET, $this->invoice);
+        $resp = $this->getPlugin()->getTransaction($this->getReceiptId(), $this->invoice);
 
         // Decode and check transaction ID
         $body = @json_decode($resp->getBody(), true);
