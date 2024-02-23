@@ -91,35 +91,6 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 }
             })
         );
-
-        // Substitute aMember PDF invoice for Paddle's one
-        $this->getDi()->hook->add(Am_Event::PDF_INVOICE_BEFORE_RENDER, function (Am_Event $e) {
-            $payment = $e->getPayment();
-            if ($payment->paysys_id != $this->getId()) {
-                return;
-            }
-            $invoice = $e->getInvoice();
-            $url = $this->getDi()->url(
-                'payment/'.$this->getId().'/invoice',
-                [
-                    'id' => $invoice->getSecureId($this->getId()),
-                    'txn' => $payment->receipt_id,
-                ],
-                false,
-                true
-            );
-
-            try {
-                $new = Zend_Pdf::parse(file_get_contents($url));
-                $pdf = $e->getPdf();
-                $pdf->pages[0] = clone $new->pages[0];
-            } catch (Exception $e) {
-                // do nothing... PDF will be blank
-                // which is ok as its not our invoice to issue
-            }
-            $e->stop(); // stops other plugins processing this event
-            $e->setReturn(true);
-        });
     }
 
     public function renderStatement(Am_View $v)
