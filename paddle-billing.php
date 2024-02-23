@@ -104,11 +104,12 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 [
                     'id' => $invoice->getSecureId($this->getId()),
                     'txn' => $payment->receipt_id,
-                ]
+                ],
+                false
             );
-            header("Location: $url");
-            exit;
+            header("Location: {$url}");
 
+            exit;
         });
     }
 
@@ -1407,7 +1408,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
     /**
      * Override to force update of user fields if set in Paddle
      * The orginal method just backfills empty data.
-     * This backfills all data that exists in Paddle
+     * This backfills all data that exists in Paddle.
      */
     public function fillInUserFields(User $user)
     {
