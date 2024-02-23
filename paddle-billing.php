@@ -9,6 +9,7 @@
  * ============================================================================
  * Revision History:
  * ----------------
+ * 2024-02-23   v1.4    R Woodgate  Force update of user data from Paddle
  * 2024-02-20   v1.3    R Woodgate  Refactor transaction API call
  * 2024-02-17   v1.2    R Woodgate  Added tax mode/category selectors
  * 2024-02-16   v1.1    R Woodgate  Work around for Paddle non-catalog item bug
@@ -20,7 +21,7 @@
 class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
-    public const PLUGIN_REVISION = '1.3';
+    public const PLUGIN_REVISION = '1.4';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
@@ -1384,6 +1385,29 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
         return $products;
     }
 
+    /**
+     * Override to force update of user fields if set in Paddle
+     * The orginal method just backfills empty data.
+     * This backfills all data that exists in Paddle
+     */
+    public function fillInUserFields(User $user)
+    {
+        $info = $this->fetchUserInfo();
+        if (!$info) {
+            return;
+        }
+        $updated = 0;
+        foreach ($info as $k => $v) {
+            if (!empty($v)) {
+                $user->set($k, $v);
+                ++$updated;
+            }
+        }
+        if ($updated) {
+            $user->update();
+        }
+    }
+
     public function autoCreateGetProductQuantity(Product $pr)
     {
         return $this->_qty[$pr->pk()];
@@ -1420,7 +1444,6 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
 
         // Backfill user details, as customer may have added extra
         // info via the checkout form (like tax id, address etc)
-        // NB: This doesn't CHANGE existing user data, just adds to it!
         $user = $this->invoice->getUser();
         if ($user) {
             try {
