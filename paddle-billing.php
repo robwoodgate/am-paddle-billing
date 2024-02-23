@@ -92,7 +92,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             })
         );
 
-        // Substitute aMember PDF invoice for our own
+        // Substitute aMember PDF invoice for Paddle's one
         $this->getDi()->hook->add(Am_Event::PDF_INVOICE_BEFORE_RENDER, function (Am_Event $e) {
             $payment = $e->getPayment();
             if ($payment->paysys_id != $this->getId()) {
@@ -105,12 +105,19 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                     'id' => $invoice->getSecureId($this->getId()),
                     'txn' => $payment->receipt_id,
                 ],
-                false, true
+                false,
+                true
             );
-            $new = Zend_Pdf::parse(file_get_contents($url));
-            $pdf = $e->getPdf();
-            $pdf->pages[0] = clone $new->pages[0];
-            $e->stop(); // stops other plugins processing this
+
+            try {
+                $new = Zend_Pdf::parse(file_get_contents($url));
+                $pdf = $e->getPdf();
+                $pdf->pages[0] = clone $new->pages[0];
+            } catch (Exception $e) {
+                // do nothing... PDF will be blank
+                // which is ok as its not our invoice to issue
+            }
+            $e->stop(); // stops other plugins processing this event
             $e->setReturn(true);
         });
     }
@@ -1526,7 +1533,8 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
             $this->log->add('Added free access for transaction_id: '.$this->getUniqId());
         } else {
             // Add payment for next paid period
-            $this->invoice->addPayment($this);
+            $p = $this->invoice->addPayment($this);
+            $p->updateQuick('display_invoice_id', $this->generateInvoiceExternalId());
             $this->log->add('Added payment for transaction_id: '.$this->getUniqId());
         }
 
