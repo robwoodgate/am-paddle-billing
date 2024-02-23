@@ -21,7 +21,7 @@
 class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
-    public const PLUGIN_REVISION = '1.4.1';
+    public const PLUGIN_REVISION = '1.4';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
@@ -105,11 +105,13 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                     'id' => $invoice->getSecureId($this->getId()),
                     'txn' => $payment->receipt_id,
                 ],
-                false
+                false, true
             );
-            header("Location: {$url}");
-
-            exit;
+            $new = Zend_Pdf::parse(file_get_contents($url));
+            $pdf = $e->getPdf();
+            $pdf->pages[0] = clone $new->pages[0];
+            $e->stop(); // stops other plugins processing this
+            $e->setReturn(true);
         });
     }
 
