@@ -21,7 +21,7 @@
 class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
-    public const PLUGIN_REVISION = '1.4';
+    public const PLUGIN_REVISION = '1.4.1';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
@@ -91,6 +91,25 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 }
             })
         );
+
+        // Substitute aMember PDF invoice for our own
+        $this->getDi()->hook->add(Am_Event::PDF_INVOICE_BEFORE_RENDER, function (Am_Event $e) {
+            $payment = $e->getPayment();
+            if ($payment->paysys_id != $this->getId()) {
+                return;
+            }
+            $invoice = $e->getInvoice();
+            $url = $this->getDi()->url(
+                'payment/'.$this->getId().'/invoice',
+                [
+                    'id' => $invoice->getSecureId($this->getId()),
+                    'txn' => $payment->receipt_id,
+                ]
+            );
+            header("Location: $url");
+            exit;
+
+        });
     }
 
     public function renderStatement(Am_View $v)
