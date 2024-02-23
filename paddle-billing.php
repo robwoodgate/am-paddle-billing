@@ -847,7 +847,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
      *
      * @return HTTP_Request2_Response The API Response
      */
-    public function getTransaction($txn_id, ?Invoice $invoice = null)
+    public function getPaddleTransaction($txn_id, ?Invoice $invoice = null)
     {
         return $this->_sendRequest('transactions/'.$txn_id.'?include=address,business,customer', null, 'GET TRANSACTION', Am_HttpRequest::METHOD_GET, $invoice);
     }
@@ -1360,7 +1360,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
     {
         // Get the transaction again, this time with customer details included
         // It's faster than calling each API seperately!
-        $resp = $this->getPlugin()->getTransaction($this->getReceiptId(), $this->invoice);
+        $resp = $this->getPlugin()->getPaddleTransaction($this->getReceiptId(), $this->invoice);
 
         // Decode and check transaction ID
         $body = @json_decode($resp->getBody(), true);
