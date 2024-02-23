@@ -572,6 +572,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         if ('pay' == $request->getActionName()) {
             $ptxn = $request->getParam('_ptxn');
             $view = $this->getDi()->view;
+            $view->title = 'Paddle Billing';
             $mem_url = $this->getDi()->surl('login');
             $msg = ___("Enjoy your membership. Please click %shere%s to access your member's area.", '<a href="'.$mem_url.'">', '</a>');
             $view->content = '<div style="display:flex;align-items: center;justify-content:center;height:100%;max-width:800px;margin:0 auto;text-align:center;padding:2em;"><strong style="font-size:20px;font-weight:bold">'.$msg.'</strong></div>';
