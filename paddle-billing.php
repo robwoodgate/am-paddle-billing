@@ -1,7 +1,8 @@
 <?php
 /**
  * Paddle Billing
- * Contributed by R Woodgate, Cogmentis Ltd.
+ * Copyright 2024 (c) R Woodgate, Cogmentis Ltd.
+ * All Rights Reserved.
  *
  * @desc Paddle Billing is the evolution of Paddle Classic, and is the default billing API for Paddle accounts created after August 8th, 2023.
  */
@@ -9,10 +10,7 @@
  * ============================================================================
  * Revision History:
  * ----------------
- * 2024-02-23   v1.4    R Woodgate  Force update of user data from Paddle
- * 2024-02-20   v1.3    R Woodgate  Refactor transaction API call
- * 2024-02-17   v1.2    R Woodgate  Added tax mode/category selectors
- * 2024-02-16   v1.1    R Woodgate  Work around for Paddle non-catalog item bug
+ * 2024-02-24   v2.0    R Woodgate  Public release
  * 2024-01-31   v1.0    R Woodgate  Plugin Created
  * ============================================================================.
  *
@@ -21,15 +19,16 @@
 class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
-    public const PLUGIN_REVISION = '1.4';
+    public const PLUGIN_REVISION = '2.0';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
     public const ADDRESS_ID = 'paddle-billing_add_id';
     public const BUSINESS_ID = 'paddle-billing_biz_id';
     public const CUSTOMER_ID = 'paddle-billing_ctm_id';
+    public const INV_XCURR = 'paddle-billing-xcurrency';
     public const INV_XRATE = 'paddle-billing_xrate';
-    public const TXNITM = 'paddle-billing_txnitm';
+    public const INV_TXNITM = 'paddle-billing_txnitm';
     public const TAX_CATEGORY = 'paddle-billing_tax_cat';
     public const TAX_MODE = 'paddle-billing_tax_mode';
     public const LIVE_URL = 'https://api.paddle.com/';
@@ -87,7 +86,17 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             new Am_Block_Base('Paddle Subscription ID', 'paddle-subid', $this, function (Am_View $v) {
                 $sub_id = $v->invoice->data()->get(static::SUBSCRIPTION_ID);
                 if ($sub_id && $v->invoice->paysys_id == $this->getId()) {
-                    return 'Paddle Subscription ID: <a href="https://vendors.paddle.com/subscriptions-v2/'.$sub_id.'">'.$sub_id.'</a>';
+                    $ret = 'Paddle Subscription ID: <a href="https://vendors.paddle.com/subscriptions-v2/'.$sub_id.'">'.$sub_id.'</a>';
+                    $xcurr = $v->invoice->data()->get(static::INV_XCURR);
+                    $xrate = $v->invoice->data()->get(static::INV_XRATE);
+                    if ($xcurr) {
+                        $ret .= '<br>Payment Currency: '.$xcurr;
+                    }
+                    if ($xrate) {
+                        $ret .= '<br>Exchange Rate: '.$xrate;
+                    }
+
+                    return $ret;
                 }
             })
         );
@@ -673,7 +682,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         // and build the items payload
         $items = [];
         $this->invoice = $payment->getInvoice(); // for log
-        $txnitms = $this->invoice->data()->get(static::TXNITM);
+        $txnitms = $this->invoice->data()->get(static::INV_TXNITM);
         foreach ($txnitms as $txnitm) {
             $items[] = [
                 'type' => 'full',
@@ -1266,7 +1275,11 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
             // Calc and save xrate
             if ($inv_amt > 0 && $amount > 0) {
                 $xrate = $amount / $inv_amt;
-                $this->invoice->data()->set(Am_Paysystem_PaddleBilling::INV_XRATE, $xrate)->update();
+                $this->invoice->data()
+                    ->set(Am_Paysystem_PaddleBilling::INV_XRATE, $xrate)
+                    ->set(Am_Paysystem_PaddleBilling::INV_XCURR, $currency)
+                    ->update()
+                ;
                 $this->log->add(
                     "Saved {$currency}/{$this->invoice->currency} xrate: {$xrate}"
                 );
@@ -1427,10 +1440,10 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
         // Saves us adding the subscription.created webhook too...
         $subscription_id = $this->event['data']['subscription_id'];
         if ($subscription_id) {
-            $this->invoice->data()->set(
-                Am_Paysystem_PaddleBilling::SUBSCRIPTION_ID,
-                $subscription_id
-            )->update();
+            $this->invoice->data()
+                ->set(Am_Paysystem_PaddleBilling::SUBSCRIPTION_ID, $subscription_id)
+                ->update()
+            ;
         }
 
         // Save the billed line items in case of refund
@@ -1441,7 +1454,10 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
                 $line_items[] = $txnitm['id'];
             }
         }
-        $this->invoice->data()->set(Am_Paysystem_PaddleBilling::TXNITM, $line_items)->update();
+        $this->invoice->data()
+            ->set(Am_Paysystem_PaddleBilling::INV_TXNITM, $line_items)
+            ->update()
+        ;
 
         // Backfill user details, as customer may have added extra
         // info via the checkout form (like tax id, address etc)
