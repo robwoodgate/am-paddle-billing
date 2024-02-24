@@ -87,13 +87,12 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                 $sub_id = $v->invoice->data()->get(static::SUBSCRIPTION_ID);
                 if ($sub_id && $v->invoice->paysys_id == $this->getId()) {
                     $ret = 'Paddle Subscription ID: <a href="https://vendors.paddle.com/subscriptions-v2/'.$sub_id.'">'.$sub_id.'</a>';
+                    $icurr = $v->invoice->currency;
                     $xcurr = $v->invoice->data()->get(static::INV_XCURR);
                     $xrate = $v->invoice->data()->get(static::INV_XRATE);
                     if ($xcurr) {
-                        $ret .= '<br>Payment Currency: '.$xcurr;
-                    }
-                    if ($xrate) {
-                        $ret .= '<br>Exchange Rate: '.$xrate;
+                        $ret .= '<br>'.___('Payment Currency:').' '.$xcurr;
+                        $ret .= '<br>'.___('Exchange Rate:')." {$xrate} {$xcurr}/{$icurr}";
                     }
 
                     return $ret;
