@@ -91,7 +91,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                     $xcurr = $v->invoice->data()->get(static::INV_XCURR);
                     $xrate = $v->invoice->data()->get(static::INV_XRATE);
                     if ($xcurr) {
-                        $ret .= "<br>Payment Currency: $xcurr";
+                        $ret .= "<br>Paddle Payment Currency: $xcurr";
                         $ret .= "<br>Exchange Rate: {$xrate} {$xcurr}/{$icurr}";
                     }
 
