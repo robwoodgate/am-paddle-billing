@@ -10,7 +10,7 @@
  * ============================================================================
  * Revision History:
  * ----------------
- * 2024-04-06   v2.1    R Woodgate  Tweak invoice amount handling
+ * 2024-04-06   v2.2    R Woodgate  Tweak invoice/refund amount handling
  * 2024-02-24   v2.0    R Woodgate  Public release
  * 2024-01-31   v1.0    R Woodgate  Plugin Created
  * ============================================================================.
@@ -20,7 +20,7 @@
 class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
-    public const PLUGIN_REVISION = '2.1';
+    public const PLUGIN_REVISION = '2.2';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
@@ -92,7 +92,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                     $xcurr = $v->invoice->data()->get(static::INV_XCURR);
                     $xrate = $v->invoice->data()->get(static::INV_XRATE);
                     if ($xcurr) {
-                        $ret .= "<br>Paddle Payment Currency: $xcurr";
+                        $ret .= "<br>Paddle Payment Currency: {$xcurr}";
                         $ret .= "<br>Exchange Rate: {$xrate} {$xcurr}/{$icurr}";
                     }
 
@@ -1714,8 +1714,22 @@ class Am_Paysystem_PaddleBilling_Webhook_Adjustment extends Am_Paysystem_Transac
                     return; // all done
                 }
 
+                // Paddle can add taxes externally, which can make the refund
+                // amount higher than the total amount recorded in aMember.
+                // So use the lower of aMember total and refund amount
+                // @see: TAX_MODE
+                $totalPaid = 0;
+                foreach ($this->getPlugin()->getDi()->invoicePaymentTable->findBy(
+                    [
+                        'receipt_id' => $this->getReceiptId(),
+                        'invoice_id' => $this->invoice->invoice_id,
+                    ]
+                ) as $p) {
+                    $totalPaid += $p->amount;
+                }
+                $amount = min($this->getAmount(), $totalPaid);
+
                 try {
-                    $amount = $this->getAmount();
                     $this->invoice->addRefund(
                         $this,
                         $this->getReceiptId(),
