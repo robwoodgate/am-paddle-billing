@@ -10,6 +10,7 @@
  * ============================================================================
  * Revision History:
  * ----------------
+ * 2024-04-06   v2.1    R Woodgate  Tweak invoice amount handling
  * 2024-02-24   v2.0    R Woodgate  Public release
  * 2024-01-31   v1.0    R Woodgate  Plugin Created
  * ============================================================================.
@@ -19,7 +20,7 @@
 class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
-    public const PLUGIN_REVISION = '2.0';
+    public const PLUGIN_REVISION = '2.1';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
@@ -1256,11 +1257,11 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
         $amount = $this->event['data']['details']['totals']['total'];
         $currency = $this->event['data']['details']['totals']['currency_code'];
         $amount /= pow(10, Am_Currency::$currencyList[$currency]['precision']);
-        $local = $amount;
 
-        // If in same currency as invoice, return it
+        // If in same currency as invoice, use default value from invoice
+        // This avoids invoices showing an "overpayment" if Paddle adds tax on top
         if ($currency == $this->invoice->currency) {
-            return Am_Currency::moneyRound($amount, $currency);
+            return null;
         }
 
         // Convert localized payments back to the invoice currency
@@ -1268,7 +1269,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
         // calculate it on first payment and use it later in case of refunds
         $xrate = $this->invoice->data()->get(Am_Paysystem_PaddleBilling::INV_XRATE);
         if (!$xrate) {
-            // Get invoice total
+            // Get invoice amount
             $inv_amt = (0.0 !== doubleval($this->invoice->first_total) && !$this->invoice->getPaymentsCount())
                 ? $this->invoice->first_total : $this->invoice->second_total;
             // Calc and save xrate
@@ -1285,6 +1286,7 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
             }
         }
         if ($xrate) {
+            $local = $amount;
             $amount /= $xrate;
             $this->log->add(
                 "Amount: {$currency} {$local} converted using {$currency}/{$this->invoice->currency} xrate: {$xrate} = {$this->invoice->currency} {$amount}"
