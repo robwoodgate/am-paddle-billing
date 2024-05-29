@@ -10,6 +10,7 @@
  * ============================================================================
  * Revision History:
  * ----------------
+ * 2024-05-29   v2.3    R Woodgate  Fix dunning extension
  * 2024-04-06   v2.2    R Woodgate  Tweak invoice/refund amount handling
  * 2024-02-24   v2.0    R Woodgate  Public release
  * 2024-01-31   v1.0    R Woodgate  Plugin Created
@@ -20,7 +21,7 @@
 class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
-    public const PLUGIN_REVISION = '2.2';
+    public const PLUGIN_REVISION = '2.3';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
@@ -1607,12 +1608,16 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
                     $this->invoice->setStatus(Invoice::RECURRING_FAILED); // self-checks
                 }
 
-                // Sync rebill date and access with Paddle's rebill date
+                // Sync rebill date with Paddle's rebill date
                 if ($rebill_date && $this->invoice->rebill_date != sqlDate($rebill_date)) {
                     $rebill_date = sqlDate($rebill_date); // do it once
-                    $this->invoice->extendAccessPeriod($rebill_date);
                     $this->invoice->updateQuick('rebill_date', $rebill_date);
-                    $this->log->add('Set rebill date and extended access to: '.$rebill_date);
+                    $this->log->add('Set rebill date to: '.$rebill_date);
+                    if ('past_due' == $status) {
+                        // Subscription is in dunning, so also extend access
+                        $this->invoice->extendAccessPeriod($rebill_date);
+                        $this->log->add('Past Due: Extended access to: '.$rebill_date);
+                    }
                 }
 
                 break;
