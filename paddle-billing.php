@@ -10,6 +10,7 @@
  * ============================================================================
  * Revision History:
  * ----------------
+ * 2024-06-02   v2.4    R Woodgate  Fix rebill date calculation
  * 2024-05-29   v2.3    R Woodgate  Fix dunning extension
  * 2024-04-06   v2.2    R Woodgate  Tweak invoice/refund amount handling
  * 2024-02-24   v2.0    R Woodgate  Public release
@@ -21,7 +22,7 @@
 class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
-    public const PLUGIN_REVISION = '2.3';
+    public const PLUGIN_REVISION = '2.4';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
@@ -1522,6 +1523,11 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
             $this->log->add('Added free access for transaction_id: '.$this->getUniqId());
         } else {
             // Add payment for next paid period
+            // Note: Rebill date is kept in sync with Paddle via subscription.updated
+            // which generally fires right before the transaction completes.
+            // addPayment() tries to extend the existing rebill date, so by setting
+            // it to null here, it will be extended from today
+            $this->invoice->rebill_date = null;
             $p = $this->invoice->addPayment($this);
             $p->updateQuick('display_invoice_id', $this->generateInvoiceExternalId());
             $this->log->add('Added payment for transaction_id: '.$this->getUniqId());
