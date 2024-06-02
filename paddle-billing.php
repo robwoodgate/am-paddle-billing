@@ -89,7 +89,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             new Am_Block_Base('Paddle Subscription ID', 'paddle-subid', $this, function (Am_View $v) {
                 $sub_id = $v->invoice->data()->get(static::SUBSCRIPTION_ID);
                 if ($sub_id && $v->invoice->paysys_id == $this->getId()) {
-                    $ret = 'Paddle Subscription ID: <a href="https://vendors.paddle.com/subscriptions-v2/'.$sub_id.'">'.$sub_id.'</a>';
+                    $ret = 'Paddle Subscription ID: <a href="https://vendors.paddle.com/subscriptions-v2/'.$sub_id.'" target="_blank">'.$sub_id.'</a>';
                     $icurr = $v->invoice->currency;
                     $xcurr = $v->invoice->data()->get(static::INV_XCURR);
                     $xrate = $v->invoice->data()->get(static::INV_XRATE);
