@@ -1,28 +1,17 @@
 <?php
 /**
  * Paddle Billing
- * Copyright 2024 (c) R Woodgate, Cogmentis Ltd.
- * All Rights Reserved.
+ * Author: R Woodgate, Cogmentis Ltd.
+ * Author URI: https://www.cogmentis.com/.
  *
  * @desc Paddle Billing is the evolution of Paddle Classic, and is the default billing API for Paddle accounts created after August 8th, 2023.
- */
-/**
- * ============================================================================
- * Revision History:
- * ----------------
- * 2024-06-02   v2.4    R Woodgate  Fix rebill date calculation
- * 2024-05-29   v2.3    R Woodgate  Fix dunning extension
- * 2024-04-06   v2.2    R Woodgate  Tweak invoice/refund amount handling
- * 2024-02-24   v2.0    R Woodgate  Public release
- * 2024-01-31   v1.0    R Woodgate  Plugin Created
- * ============================================================================.
  *
  * @am_payment_api 6.0
  */
 class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
-    public const PLUGIN_REVISION = '2.4';
+    public const PLUGIN_REVISION = '2.5';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
@@ -814,15 +803,14 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
             -------------------------------------------------------------------------------
 
-            Copyright 2024 (c) Rob Woodgate, Cogmentis Ltd. All Rights Reserved
+            Copyright 2024 (c) Rob Woodgate, Cogmentis Ltd.
 
-            This file may not be distributed unless permission is given by author.
+            This plugin is provided under the MIT License.
 
             This file is provided AS IS with NO WARRANTY OF ANY KIND, INCLUDING
             WARRANTY OF DESIGN, MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
 
-            For support (to report bugs and request new features) visit: <a href="https://www.cogmentis.com/">www.cogmentis.com</a>
-            <img src="https://www.cogmentis.com/lcimg/paddle-billing.jpg" />
+            <strong>Like this plugin?</strong> <a href="https://btcpay.cogmentis.com/apps/359ErQmassvNesyXYkLqD3JU4SP2/pos" target="_blank">Buy me a coffee</a>
             -------------------------------------------------------------------------------
             README;
     }
