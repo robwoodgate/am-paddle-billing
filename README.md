@@ -23,4 +23,4 @@ Copyright 2024 (c) Rob Woodgate, Cogmentis Ltd.
 
 <https://www.cogmentis.com/>
 
-Buy me a coffee: <https://btcpay.cogmentis.com/apps/359ErQmassvNesyXYkLqD3JU4SP2/pos>
+Buy me a coffee: <https://donate.cogmentis.com>

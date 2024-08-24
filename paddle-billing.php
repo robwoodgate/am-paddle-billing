@@ -810,7 +810,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             This file is provided AS IS with NO WARRANTY OF ANY KIND, INCLUDING
             WARRANTY OF DESIGN, MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
 
-            <strong>Like this plugin?</strong> <a href="https://btcpay.cogmentis.com/apps/359ErQmassvNesyXYkLqD3JU4SP2/pos" target="_blank">Buy me a coffee</a>
+            <strong>Like this plugin?</strong> <a href="https://donate.cogmentis.com" target="_blank">Buy me a coffee</a>
             -------------------------------------------------------------------------------
             README;
     }
