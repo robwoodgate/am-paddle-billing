@@ -11,7 +11,7 @@
 class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
-    public const PLUGIN_REVISION = '2.5';
+    public const PLUGIN_REVISION = '2.6';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
@@ -335,7 +335,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
             // Build the core transaction item payload
             $txnitm = [
-                'quantity' => $item->qty,
+                'quantity' => (int) $item->qty,
                 'price' => [
                     'description' => $product->getBillingPlan()->getTerms(),
                     'name' => ___('Subscription').$sptext,
@@ -356,8 +356,8 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
                         'currency_code' => $item->currency,
                     ],
                     'quantity' => [
-                        'minimum' => $item->qty,
-                        'maximum' => $item->qty,
+                        'minimum' => (int) $item->qty,
+                        'maximum' => (int) $item->qty,
                     ],
                     'custom_data' => [
                         'invoice_item' => $item->item_id,
@@ -763,6 +763,8 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         $whk_url = $this->getPluginUrl('ipn');
         $pay_url = $this->getPluginUrl('pay');
         $paddleJs = $this->paddleJsSetupCode(true);
+        $ilog_url = Am_Di::getInstance()->url('default/admin-logs/p/invoice');
+        $elog_url = Am_Di::getInstance()->url('default/admin-logs/');
 
         return <<<README
             <strong>Paddle Billing Plugin v{$version}</strong>
@@ -800,6 +802,11 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             If you are using Paddle Retain, you can optionally insert the following snippet on your website pages to show retry payment forms for customers in dunning, and card update reminders.
 
             <textarea onclick="this.select();" style="width:100%;" rows="8">{$paddleJs}</textarea>
+
+            <strong>TROUBLESHOOTING</strong>
+            This plugin writes Paddle responses to the aMember <a href="{$ilog_url}">Invoice log</a>.
+
+            In case of an error, please check there as well as in the aMember <a href="{$elog_url}">Error log</a>.
 
             -------------------------------------------------------------------------------
 
@@ -990,7 +997,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         return (string) ($amount * pow(10, Am_Currency::$currencyList[$currency]['precision']));
     }
 
-    protected function getText($period)
+    protected function getText($period): string
     {
         // Convert string if needed
         if (!$period instanceof Am_Period) {
@@ -1000,7 +1007,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         return ucwords($period->getText());
     }
 
-    protected function getRebillText($rebill_times)
+    protected function getRebillText($rebill_times): string
     {
         switch ($rebill_times) {
             case '0':
@@ -1019,7 +1026,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         return ucwords($period->getText());
     }
 
-    protected function getFrequency($period)
+    protected function getFrequency($period): int
     {
         // Convert string if needed
         if (!$period instanceof Am_Period) {
@@ -1032,10 +1039,10 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             return 1;
         }
 
-        return $period->getCount();
+        return (int) $period->getCount();
     }
 
-    protected function getInterval($period)
+    protected function getInterval($period): string
     {
         // Convert string if needed
         if (!$period instanceof Am_Period) {
@@ -1051,7 +1058,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
         return $map[$period->getUnit()] ?? 'year';
     }
 
-    protected function getDays($period)
+    protected function getDays($period): int
     {
         // Convert string if needed
         if (!$period instanceof Am_Period) {
@@ -1060,26 +1067,26 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
         switch ($period->getUnit()) {
             case Am_Period::DAY:
-                return $period->getCount();
+                return (int) $period->getCount();
 
             case Am_Period::MONTH:
-                return $period->getCount() * 30;
+                return (int) ($period->getCount() * 30);
 
             case Am_Period::YEAR:
-                return $period->getCount() * 365;
+                return (int) ($period->getCount() * 365);
 
             case Am_Period::FIXED:
             case Am_Period::MAX_SQL_DATE:
                 $date = new DateTime($period->getCount());
 
-                return $date->diff(new DateTime('now'))->days + 1;
+                return (int) ($date->diff(new DateTime('now'))->days + 1);
 
             default:
                 return 10; // actual value in this case does not matter
         }
     }
 
-    protected function paddleJsSetupCode($snippet = false)
+    protected function paddleJsSetupCode($snippet = false): string
     {
         $environment = $this->isSandbox() ? 'Paddle.Environment.set("sandbox");' : '';
         $client_token = $this->getConfig('client_token');
