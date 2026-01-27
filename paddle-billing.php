@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Paddle Billing
  * Author: R Woodgate, Cogmentis Ltd.
@@ -11,7 +12,7 @@
 class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
-    public const PLUGIN_REVISION = '2.6';
+    public const PLUGIN_REVISION = '3.0';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
@@ -309,6 +310,8 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             $rebill = null;
             $fptext = ': '.$this->getText($item->first_period);
             $sptext = ': '.$this->getRebillText($item->rebill_times);
+
+            /** @var Product $product */
             $product = $item->tryLoadProduct();
             if (!$product) {
                 continue; // should never happen, but...
@@ -772,6 +775,8 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
             If you signed up for Paddle before this date, <a href="https://developer.paddle.com/changelog/2023/enable-paddle-billing" target="_blank">you need to opt-in</a> to Paddle Billing. After you opt in, you can toggle between Paddle Billing and Paddle Classic, and run the two side by side for as long as you need.
 
+            This plugin will automatically update subscriptions migrated from Paddle Classic if the subscription.imported webhook is set.
+
             <strong>Instructions</strong>
 
             1. Upload this plugin's folder and files to the <strong>amember/application/default/plugins/payment/</strong> folder of your aMember installatiion.
@@ -785,12 +790,15 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
             &bull; <code>transaction.completed</code>
             &bull; <code>subscription.canceled</code>
             &bull; <code>subscription.updated</code>
+            &bull; <code>subscription.imported</code>*
             &bull; <code>adjustment.created</code>
             &bull; <code>adjustment.updated</code>
 
             Webhook Endpoint: <input type="text" value="{$whk_url}" size="50" onclick="this.select();"></input>
 
             You will then need to copy Paddle's secret key for this webhook back to your plugin settings to complete configuration.
+
+            * subscription.imported is only required if migrating from Paddle Classic.
 
             5. In the Checkout > <a href='https://vendors.paddle.com/checkout-settings' target="_blank">Checkout Settings</a> menu of your Paddle account, set the Default Payment Link to:
 
@@ -810,7 +818,7 @@ class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 
             -------------------------------------------------------------------------------
 
-            Copyright 2024 (c) Rob Woodgate, Cogmentis Ltd.
+            Copyright 2024-2026 (c) Rob Woodgate, Cogmentis Ltd.
 
             This plugin is provided under the MIT License.
 
@@ -1174,6 +1182,7 @@ class Am_Paysystem_Transaction_PaddleBilling_Webhook extends Am_Paysystem_Transa
 
             case 'subscription.updated':
             case 'subscription.canceled':
+            case 'subscription.imported':
                 return new Am_Paysystem_PaddleBilling_Webhook_Subscription($plugin, $request, $response, $invokeArgs);
 
                 break;
@@ -1234,6 +1243,14 @@ class Am_Paysystem_Transaction_PaddleBilling_Webhook extends Am_Paysystem_Transa
     public function getReceiptId()
     {
         return $this->getUniqId();
+    }
+
+    /**
+     * @return Am_Paysystem_PaddleBilling
+     */
+    public function getPlugin()
+    {
+        return parent::getPlugin();
     }
 }
 
@@ -1330,8 +1347,19 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
 
         // Try getting it by receipt id
         $invoice = Am_Di::getInstance()->invoiceTable->findByReceiptIdAndPlugin(
-            $this->getReceiptId(),
+            $this->getReceiptId(), // txn_id
             $this->getPlugin()->getId()
+        );
+        if ($invoice) {
+            return $invoice->public_id;
+        }
+
+        // Finally, try getting it by imported Paddle Classic ID
+        $import_meta = $this->event['data']['import_meta'];
+        $external_id = $import_meta['external_id'] ?? null;
+        $invoice = Am_Di::getInstance()->invoiceTable->findFirstByData(
+            'paddle_subscription_id', // legacy id
+            $external_id
         );
 
         return $invoice ? $invoice->public_id : null;
@@ -1576,8 +1604,36 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
             $this->getReceiptId(), // txn_id
             $this->getPlugin()->getId()
         );
+        if ($invoice) {
+            return $invoice->public_id;
+        }
+
+        // Finally, try getting it by imported Paddle Classic ID
+        $import_meta = $this->event['data']['import_meta'];
+        $external_id = $import_meta['external_id'] ?? null;
+        $invoice = Am_Di::getInstance()->invoiceTable->findFirstByData(
+            'paddle_subscription_id', // legacy id
+            $external_id
+        );
 
         return $invoice ? $invoice->public_id : null;
+    }
+
+    /**
+     * Try default validation first, fall back to Paddle Classic import check.
+     */
+    public function validate()
+    {
+        try {
+            parent::validate();
+        } catch (Exception $e) {
+            // Check if this a Paddle Classic Import
+            $import_meta = $this->event['data']['import_meta'];
+            $imported_from = $import_meta['imported_from'] ?? null;
+            if ('paddle_classic' !== $imported_from || 'paddle' !== $this->invoice->paysys_id) {
+                throw $e; // rethrow
+            }
+        }
     }
 
     /**
@@ -1589,6 +1645,16 @@ class Am_Paysystem_PaddleBilling_Webhook_Subscription extends Am_Paysystem_Trans
     {
         // Handle webhook alerts
         switch ($this->event['event_type']) {
+            case 'subscription.imported':
+                // Imported from Classic - update invoice
+                $this->invoice->updateQuick('paysys_id', $this->getPaysysId());
+                $import_meta = $this->event['data']['import_meta'];
+                $external_id = $import_meta['external_id'] ?? '';
+                $note = "Subscription imported from Paddle Classic. Classic ID: {$external_id}, New Subscription ID: {$this->getUniqId()}";
+                $this->getPlugin()->addUserNote($this->invoice->getUser(), $note);
+                $this->log->add($note);
+
+                // no break - fall through
             case 'subscription.updated':
                 // Vars
                 $status = $this->event['data']['status'];

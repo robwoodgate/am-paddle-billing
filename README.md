@@ -4,6 +4,8 @@ Paddle Billing is the evolution of Paddle Classic, and is the default billing AP
 
 If you signed up for Paddle before this date, [you need to opt-in](https://developer.paddle.com/changelog/2023/enable-paddle-billing) to Paddle Billing. After you opt in, you can toggle between Paddle Billing and Paddle Classic, and run the two side by side for as long as you need.
 
+This plugin will automatically update subscriptions migrated from Paddle Classic if the subscription.imported webhook is set.
+
 ### REQUIREMENTS
 
 This plugin requires [aMember](https://www.cogmentis.com/go/amember) v6.x and PHP 7.2 or higher
@@ -24,7 +26,7 @@ In case of an error, please check there as well as in the aMember Error Log (aMe
 
 This plugin is provided under the MIT License.
 
-Copyright 2024 (c) Rob Woodgate, Cogmentis Ltd.
+Copyright 2024-2026 (c) Rob Woodgate, Cogmentis Ltd.
 
 Visit my [aMember plugins](https://www.cogmentis.com/system/cart/) store for more great plugins.
 
