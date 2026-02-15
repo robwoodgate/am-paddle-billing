@@ -12,7 +12,7 @@
 class Am_Paysystem_PaddleBilling extends Am_Paysystem_Abstract
 {
     public const PLUGIN_STATUS = self::STATUS_BETA;
-    public const PLUGIN_REVISION = '3.0';
+    public const PLUGIN_REVISION = '3.0.1';
     public const CUSTOM_DATA_INV = 'am_invoice';
     public const PRICE_ID = 'paddle-billing_pri_id';
     public const SUBSCRIPTION_ID = 'paddle-billing_sub_id';
@@ -1354,13 +1354,15 @@ class Am_Paysystem_PaddleBilling_Webhook_Transaction extends Am_Paysystem_Transa
             return $invoice->public_id;
         }
 
-        // Finally, try getting it by imported Paddle Classic ID
-        $import_meta = $this->event['data']['import_meta'];
-        $external_id = $import_meta['external_id'] ?? null;
-        $invoice = Am_Di::getInstance()->invoiceTable->findFirstByData(
-            'paddle_subscription_id', // legacy id
-            $external_id
-        );
+        // Finally, try getting it by legacy Paddle Classic passthrough
+        $custom_data = $this->event['data']['custom_data'] ?? [];
+        $passthrough = $custom_data['classic_passthrough'] ?? null;
+        if (is_string($passthrough) && $passthrough !== '') {
+            $ret = json_decode($passthrough, true); // decode the inner JSON string
+            if (is_array($ret) && !empty($ret['am_invoice'])) {
+                return $ret['am_invoice'];
+            }
+        }
 
         return $invoice ? $invoice->public_id : null;
     }
